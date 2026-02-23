@@ -1,0 +1,346 @@
+import 'package:flutter/material.dart';
+import 'package:get/get.dart';
+import 'controllers/cart_controller.dart';
+import 'quantity_selection_dialog.dart';
+import 'customer_screen.dart';
+
+/// Cart Summary Screen - Review and adjust cart items before checkout
+class CartScreen extends StatelessWidget {
+  const CartScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Cart'),
+        elevation: 0,
+      ),
+      body: Obx(() {
+        final cartController = Get.find<CartController>();
+        
+        if (cartController.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.shopping_cart_outlined,
+                  size: 80,
+                  color: colorScheme.outline,
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  'Your cart is empty',
+                  style: theme.textTheme.titleLarge,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Add products to get started',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: colorScheme.outline,
+                  ),
+                ),
+                const SizedBox(height: 32),
+                FilledButton.icon(
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.shopping_bag),
+                  label: const Text('Browse Products'),
+                ),
+              ],
+            ),
+          );
+        }
+
+        return Column(
+          children: [
+            // Cart items list
+            Expanded(
+              child: ListView.builder(
+                padding: const EdgeInsets.all(16),
+                itemCount: cartController.items.length,
+                itemBuilder: (context, index) {
+                  final item = cartController.items[index];
+                  return _CartItemCard(
+                    item: item,
+                    onQuantityUpdate: (newQuantity) {
+                      try {
+                        cartController.updateQuantity(
+                          item.product.productId,
+                          newQuantity,
+                        );
+                      } catch (e) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              e.toString().replaceAll('Exception: ', ''),
+                            ),
+                            backgroundColor: colorScheme.error,
+                          ),
+                        );
+                      }
+                    },
+                    onRemove: () {
+                      cartController.removeItem(item.product.productId);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('${item.product.name} removed'),
+                          behavior: SnackBarBehavior.floating,
+                          duration: const Duration(seconds: 1),
+                        ),
+                      );
+                    },
+                    onEdit: () async {
+                      final quantity = await showDialog<double>(
+                        context: context,
+                        builder: (context) => QuantitySelectionDialog(
+                          product: item.product,
+                        ),
+                      );
+
+                      if (quantity != null && quantity > 0) {
+                        try {
+                          cartController.updateQuantity(
+                            item.product.productId,
+                            quantity,
+                          );
+                        } catch (e) {
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  e.toString().replaceAll('Exception: ', ''),
+                                ),
+                                backgroundColor: colorScheme.error,
+                              ),
+                            );
+                          }
+                        }
+                      }
+                    },
+                  );
+                },
+              ),
+            ),
+
+            // Cart summary and checkout
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: colorScheme.surfaceContainerHighest,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.05),
+                    blurRadius: 8,
+                    offset: const Offset(0, -2),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Subtotal
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Subtotal',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      Text(
+                        '₹${cartController.totalAmount.toStringAsFixed(2)}',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  // Checkout button
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (context) => const CustomerScreen(),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.arrow_forward),
+                      label: Text(
+                        'Proceed to Checkout (${cartController.itemCount} ${cartController.itemCount == 1 ? 'item' : 'items'})',
+                      ),
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        );
+      }),
+    );
+  }
+}
+
+class _CartItemCard extends StatelessWidget {
+  final CartItem item;
+  final ValueChanged<double> onQuantityUpdate;
+  final VoidCallback onRemove;
+  final VoidCallback onEdit;
+
+  const _CartItemCard({
+    required this.item,
+    required this.onQuantityUpdate,
+    required this.onRemove,
+    required this.onEdit,
+  });
+
+  String _getMeasurementUnit() {
+    return item.product.measurementType.toLowerCase();
+  }
+
+  bool get _isWeightBased {
+    final type = item.product.measurementType.toLowerCase();
+    return type == 'kg' || type == 'gm';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(
+          color: colorScheme.outline.withOpacity(0.1),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            // Product icon
+            Container(
+              width: 60,
+              height: 60,
+              decoration: BoxDecoration(
+                color: colorScheme.primaryContainer,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(
+                Icons.shopping_bag,
+                color: colorScheme.onPrimaryContainer,
+              ),
+            ),
+            const SizedBox(width: 16),
+            // Product details
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item.product.name,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '₹${item.priceSnapshot.toStringAsFixed(2)} per $_getMeasurementUnit()',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: colorScheme.outline,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  // Quantity controls
+                  Row(
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.remove_circle_outline),
+                        onPressed: item.quantityOrWeight <=
+                                (_isWeightBased ? 0.1 : 1)
+                            ? null
+                            : () => onQuantityUpdate(
+                                  item.quantityOrWeight -
+                                      (_isWeightBased ? 0.1 : 1),
+                                ),
+                        iconSize: 20,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '${item.quantityOrWeight.toStringAsFixed(_isWeightBased ? 2 : 0)} $_getMeasurementUnit()',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        icon: const Icon(Icons.add_circle_outline),
+                        onPressed: item.quantityOrWeight >= item.product.stock
+                            ? null
+                            : () => onQuantityUpdate(
+                                  item.quantityOrWeight +
+                                      (_isWeightBased ? 0.1 : 1),
+                                ),
+                        iconSize: 20,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        icon: const Icon(Icons.edit_outlined),
+                        onPressed: onEdit,
+                        iconSize: 18,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        tooltip: 'Edit quantity',
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            // Price and remove
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  '₹${item.totalPrice.toStringAsFixed(2)}',
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: colorScheme.primary,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                IconButton(
+                  icon: Icon(
+                    Icons.delete_outline,
+                    color: colorScheme.error,
+                  ),
+                  onPressed: onRemove,
+                  tooltip: 'Remove item',
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

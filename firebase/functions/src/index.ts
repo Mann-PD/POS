@@ -1,0 +1,92 @@
+/**
+ * Firebase Cloud Functions Entry Point
+ * 
+ * LOCATION: firebase/functions/src/index.ts
+ * 
+ * REQUIREMENTS:
+ * - Export confirmOrder
+ * - Export cancelOrder
+ * - Export inventoryLogs
+ * - Export expenseAudit
+ * - Export auth_audit
+ * 
+ * This file exports all Cloud Functions for the POS System.
+ * 
+ * STRICT RULES:
+ * - All critical business rules are enforced in individual functions
+ * - Never trust frontend data
+ * - Validate role and shopId in every function
+ * - Use Firestore transactions for atomic operations
+ * - Write audit logs for all critical actions
+ * 
+ * Based on TECHNICAL REQUIREMENTS IN DETAIL.md
+ */
+
+import * as admin from 'firebase-admin';
+
+// Initialize Firebase Admin
+admin.initializeApp();
+
+// ============================================================================
+// ORDER FUNCTIONS
+// ============================================================================
+
+// Export confirmOrder - Confirms order and deducts inventory atomically
+export { confirmOrder } from './orders/confirmOrder';
+
+// Export cancelOrder - Cancels pending orders (Admin/Super Admin only)
+export { cancelOrder } from './orders/cancelOrder';
+
+// ============================================================================
+// INVENTORY LOGS
+// ============================================================================
+
+// Export inventory logging functions
+export {
+  createInventoryLog,
+  createInventoryLogsBatch,
+  getInventoryLogsForProduct,
+  getInventoryLogsForShop,
+} from './inventory/inventoryLogs';
+
+// ============================================================================
+// EXPENSE AUDIT FUNCTIONS
+// ============================================================================
+
+// Export expense callable functions (create/update with role validation)
+export {
+  createExpense,
+  updateExpense,
+} from './expenses/expenseAudit';
+
+// Export expense Firestore triggers (backup audit logging)
+export {
+  onExpenseCreate,
+  onExpenseUpdate,
+  onExpenseDelete,
+} from './expenses/expenseAudit';
+
+// ============================================================================
+// AUTHENTICATION AUDIT FUNCTIONS
+// ============================================================================
+
+// Export authentication audit callable functions
+export {
+  logLoginSuccess,
+  logLoginFailure,
+  logLogout,
+  logPasswordResetRequest,
+  logPasswordResetComplete,
+} from './auth/auth_audit';
+
+// Export authentication Firestore triggers
+export {
+  onUserStatusChange,
+} from './auth/auth_audit';
+
+// ============================================================================
+// PRODUCT TRIGGERS
+// ============================================================================
+
+// Export product price change trigger
+export { onPriceChange } from './products/onPriceChange';

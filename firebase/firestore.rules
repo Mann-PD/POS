@@ -1,0 +1,458 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ============================================
+    // AUTHENTICATION CHECK - DENY ALL IF NOT AUTHENTICATED
+    // ============================================
+    
+    // Global check: deny all access if not authenticated
+    function requireAuth() {
+      return request.auth != null;
+    }
+    
+    // ============================================
+    // HELPER FUNCTIONS
+    // ============================================
+    
+    // Get user document from Firestore
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    
+    // Get user role
+    function getUserRole() {
+      return requireAuth() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) 
+        ? getUserData().role 
+        : null;
+    }
+    
+    // Get user shopId
+    function getUserShopId() {
+      return requireAuth() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) 
+        ? getUserData().shopId 
+        : null;
+    }
+    
+    // Check if user is Super Admin
+    function isSuperAdmin() {
+      return getUserRole() == 'Super Admin';
+    }
+    
+    // Check if user is Admin
+    function isAdmin() {
+      return getUserRole() == 'Admin';
+    }
+    
+    // Check if user is Employee
+    function isEmployee() {
+      return getUserRole() == 'Employee';
+    }
+    
+    // Check if user is Viewer
+    function isViewer() {
+      return getUserRole() == 'Viewer';
+    }
+    
+    // Check if user is active
+    function isUserActive() {
+      return requireAuth() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) 
+        && getUserData().status == 'Active';
+    }
+    
+    // Check if resource shopId matches user shopId
+    function isSameShop(resourceShopId) {
+      return getUserShopId() == resourceShopId;
+    }
+    
+    // Check if user owns the resource (userId matches)
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+    
+    // Validate shopId is present and matches user's shop (except Super Admin)
+    function validateShopId(resourceShopId) {
+      return isSuperAdmin() || (resourceShopId != null && isSameShop(resourceShopId));
+    }
+    
+    // ============================================
+    // USERS COLLECTION
+    // ============================================
+    
+    match /users/{userId} {
+      // Read rules
+      allow read: if requireAuth() && isUserActive() && (
+        isSuperAdmin() || // Super Admin: read all
+        (isAdmin() && isSameShop(resource.data.shopId)) || // Admin: read users in same shop
+        (isEmployee() && isOwner(userId)) // Employee: read own user document only
+      );
+      // Viewer: no access (implicitly denied)
+      
+      // Create rules
+      allow create: if requireAuth() && isUserActive() && (
+        isSuperAdmin() || // Super Admin: create all
+        (isAdmin() && validateShopId(request.resource.data.shopId) && 
+         request.resource.data.role == 'Employee') // Admin: create employees in same shop
+      ) &&
+      // Validate required fields
+      request.resource.data.keys().hasAll(['userId', 'name', 'email', 'phone', 'role', 'shopId', 'status', 'createdAt']) &&
+      request.resource.data.userId == userId &&
+      request.resource.data.role is string &&
+      request.resource.data.shopId is string &&
+      request.resource.data.status is string &&
+      request.resource.data.createdAt is timestamp;
+      
+      // Update rules
+      allow update: if requireAuth() && isUserActive() && (
+        isSuperAdmin() || // Super Admin: update all
+        (isAdmin() && isSameShop(resource.data.shopId) && 
+         resource.data.role == 'Employee' && 
+         validateShopId(request.resource.data.shopId)) // Admin: update employees in same shop
+      ) &&
+      // Immutable fields: role and userId must not change
+      request.resource.data.role == resource.data.role &&
+      request.resource.data.userId == resource.data.userId &&
+      request.resource.data.createdAt == resource.data.createdAt &&
+      // Prevent shopId change for non-Super Admin
+      (isSuperAdmin() || request.resource.data.shopId == resource.data.shopId);
+      
+      // Delete rules
+      allow delete: if requireAuth() && isUserActive() && isSuperAdmin();
+    }
+    
+    // ============================================
+    // SHOPS COLLECTION
+    // ============================================
+    
+    match /shops/{shopId} {
+      // Read rules
+      allow read: if requireAuth() && isUserActive() && (
+        isSuperAdmin() || // Super Admin: read all
+        (isAdmin() && isSameShop(shopId)) // Admin: read own shop
+      );
+      // All others: denied (implicitly)
+      
+      // Create rules
+      allow create: if requireAuth() && isUserActive() && isSuperAdmin() &&
+      request.resource.data.keys().hasAll(['shopId', 'name', 'status', 'createdAt']) &&
+      request.resource.data.shopId == shopId;
+      
+      // Update rules
+      allow update: if requireAuth() && isUserActive() && isSuperAdmin();
+      
+      // Delete rules
+      allow delete: if requireAuth() && isUserActive() && isSuperAdmin();
+    }
+    
+    // ============================================
+    // PRODUCTS COLLECTION
+    // ============================================
+    
+    match /products/{productId} {
+      // Read rules
+      allow read: if requireAuth() && isUserActive() && (
+        isSuperAdmin() || // Super Admin: read all
+        (isAdmin() && isSameShop(resource.data.shopId)) || // Admin: read own shop
+        (isEmployee() && isSameShop(resource.data.shopId)) || // Employee: read own shop
+        (isViewer() && isSameShop(resource.data.shopId)) // Viewer: read only
+      );
+      
+      // Create rules
+      allow create: if requireAuth() && isUserActive() && (
+        isSuperAdmin() || // Super Admin: create all
+        (isAdmin() && validateShopId(request.resource.data.shopId)) // Admin: create in own shop
+      ) &&
+      // Validate required fields
+      request.resource.data.keys().hasAll(['productId', 'shopId', 'name', 'price', 'measurementType', 'stock', 'status', 'createdAt']) &&
+      request.resource.data.productId == productId &&
+      request.resource.data.shopId is string &&
+      request.resource.data.price is number &&
+      request.resource.data.price > 0 &&
+      request.resource.data.stock is number &&
+      request.resource.data.stock >= 0 &&
+      request.resource.data.createdAt is timestamp;
+      
+      // Update rules
+      allow update: if requireAuth() && isUserActive() && (
+        isSuperAdmin() || // Super Admin: update all
+        (isAdmin() && isSameShop(resource.data.shopId) && validateShopId(request.resource.data.shopId)) // Admin: update in own shop
+      ) &&
+      // Prevent shopId and productId changes
+      request.resource.data.shopId == resource.data.shopId &&
+      request.resource.data.productId == resource.data.productId &&
+      request.resource.data.createdAt == resource.data.createdAt &&
+      // Validate price > 0
+      request.resource.data.price is number &&
+      request.resource.data.price > 0 &&
+      // Validate stock >= 0
+      request.resource.data.stock is number &&
+      request.resource.data.stock >= 0 &&
+      // Measurement type is immutable after first sale
+      request.resource.data.measurementType == resource.data.measurementType;
+      
+      // Delete rules - DENIED FOR ALL (prevent deletion if product has history)
+      allow delete: if false;
+    }
+    
+    // ============================================
+    // CATEGORIES COLLECTION
+    // ============================================
+    
+    match /categories/{categoryId} {
+      // Read rules
+      allow read: if requireAuth() && isUserActive() && (
+        isSuperAdmin() || // Super Admin: read all
+        (isAdmin() && isSameShop(resource.data.shopId)) || // Admin: read own shop
+        (isEmployee() && isSameShop(resource.data.shopId)) || // Employee: read own shop
+        (isViewer() && isSameShop(resource.data.shopId)) // Viewer: read only
+      );
+      
+      // Create rules
+      allow create: if requireAuth() && isUserActive() && (
+        isSuperAdmin() || // Super Admin: create all
+        (isAdmin() && validateShopId(request.resource.data.shopId)) // Admin: create in own shop
+      ) &&
+      request.resource.data.keys().hasAll(['categoryId', 'shopId', 'name', 'status', 'createdAt']) &&
+      request.resource.data.categoryId == categoryId &&
+      request.resource.data.shopId is string;
+      
+      // Update rules
+      allow update: if requireAuth() && isUserActive() && (
+        isSuperAdmin() || // Super Admin: update all
+        (isAdmin() && isSameShop(resource.data.shopId) && validateShopId(request.resource.data.shopId)) // Admin: update in own shop
+      ) &&
+      request.resource.data.shopId == resource.data.shopId &&
+      request.resource.data.categoryId == resource.data.categoryId;
+      
+      // Delete rules
+      allow delete: if requireAuth() && isUserActive() && isSuperAdmin();
+    }
+    
+    // ============================================
+    // CUSTOMERS COLLECTION
+    // ============================================
+    
+    match /customers/{customerId} {
+      // Read rules
+      allow read: if requireAuth() && isUserActive() && (
+        isSuperAdmin() || // Super Admin: read all
+        (isAdmin() && isSameShop(resource.data.shopId)) || // Admin: read own shop customers
+        (isViewer() && isSameShop(resource.data.shopId)) // Viewer: read only
+      );
+      // Employee: no read access (implicitly denied)
+      
+      // Create rules
+      allow create: if requireAuth() && isUserActive() && (
+        isSuperAdmin() || // Super Admin: create all
+        (isAdmin() && validateShopId(request.resource.data.shopId)) || // Admin: create in own shop
+        (isEmployee() && validateShopId(request.resource.data.shopId)) // Employee: create only (during billing)
+      ) &&
+      // Validate required fields
+      request.resource.data.keys().hasAll(['customerId', 'shopId', 'name', 'mobile', 'createdAt']) &&
+      request.resource.data.customerId == customerId &&
+      request.resource.data.shopId is string &&
+      request.resource.data.name is string &&
+      request.resource.data.mobile is string &&
+      request.resource.data.createdAt is timestamp;
+      
+      // Update rules
+      allow update: if requireAuth() && isUserActive() && (
+        isSuperAdmin() || // Super Admin: update all
+        (isAdmin() && isSameShop(resource.data.shopId) && validateShopId(request.resource.data.shopId)) // Admin: update in own shop
+      ) &&
+      // Prevent shopId and customerId changes
+      request.resource.data.shopId == resource.data.shopId &&
+      request.resource.data.customerId == resource.data.customerId &&
+      request.resource.data.createdAt == resource.data.createdAt;
+      // Employee: no update access (implicitly denied)
+      
+      // Delete rules - DENIED FOR ALL (customer deletion must be denied)
+      allow delete: if false;
+    }
+    
+    // ============================================
+    // ORDERS COLLECTION
+    // ============================================
+    
+    match /orders/{orderId} {
+      // Read rules
+      allow read: if requireAuth() && isUserActive() && (
+        isSuperAdmin() || // Super Admin: read only
+        (isAdmin() && isSameShop(resource.data.shopId)) || // Admin: read only (own shop)
+        (isEmployee() && isSameShop(resource.data.shopId) && isOwner(resource.data.employeeId)) || // Employee: read own orders only
+        (isViewer() && isSameShop(resource.data.shopId)) // Viewer: read only
+      );
+      
+      // Create rules - Only Employees can create orders
+      allow create: if requireAuth() && isUserActive() && 
+      isEmployee() && 
+      validateShopId(request.resource.data.shopId) &&
+      // Validate required fields
+      request.resource.data.keys().hasAll(['orderId', 'shopId', 'customerId', 'employeeId', 'totalAmount', 'paymentMethod', 'paymentStatus', 'orderStatus', 'createdAt']) &&
+      request.resource.data.orderId == orderId &&
+      request.resource.data.employeeId == request.auth.uid &&
+      request.resource.data.shopId is string &&
+      request.resource.data.customerId is string &&
+      request.resource.data.totalAmount is number &&
+      request.resource.data.totalAmount > 0 &&
+      request.resource.data.paymentStatus == 'Success' &&
+      request.resource.data.createdAt is timestamp;
+      
+      // Update rules - NO UPDATES ALLOWED (no updates or deletes after creation)
+      allow update: if false;
+      
+      // Delete rules - NO DELETES ALLOWED
+      allow delete: if false;
+    }
+    
+    // ============================================
+    // ORDER ITEMS COLLECTION
+    // ============================================
+    
+    match /order_items/{orderItemId} {
+      // Read rules
+      allow read: if requireAuth() && isUserActive() && (
+        isSuperAdmin() || // Super Admin: read only
+        (isAdmin() && exists(/databases/$(database)/documents/orders/$(resource.data.orderId)) && 
+         isSameShop(get(/databases/$(database)/documents/orders/$(resource.data.orderId)).data.shopId)) || // Admin: read only (own shop)
+        (isEmployee() && exists(/databases/$(database)/documents/orders/$(resource.data.orderId)) && 
+         isOwner(get(/databases/$(database)/documents/orders/$(resource.data.orderId)).data.employeeId)) || // Employee: read own orders only
+        (isViewer() && exists(/databases/$(database)/documents/orders/$(resource.data.orderId)) && 
+         isSameShop(get(/databases/$(database)/documents/orders/$(resource.data.orderId)).data.shopId)) // Viewer: read only
+      );
+      
+      // Create rules - Only Employees can create order items
+      allow create: if requireAuth() && isUserActive() && 
+      isEmployee() &&
+      exists(/databases/$(database)/documents/orders/$(request.resource.data.orderId)) &&
+      isOwner(get(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data.employeeId) &&
+      // Validate required fields
+      request.resource.data.keys().hasAll(['orderItemId', 'orderId', 'productId', 'quantityOrWeight', 'priceSnapshot', 'totalPrice']) &&
+      request.resource.data.orderItemId == orderItemId &&
+      request.resource.data.orderId is string &&
+      request.resource.data.productId is string &&
+      request.resource.data.quantityOrWeight is number &&
+      request.resource.data.quantityOrWeight > 0 &&
+      request.resource.data.priceSnapshot is number &&
+      request.resource.data.priceSnapshot > 0 &&
+      request.resource.data.totalPrice is number &&
+      request.resource.data.totalPrice > 0;
+      
+      // Update rules - NO UPDATES ALLOWED (immutable after creation)
+      allow update: if false;
+      
+      // Delete rules - NO DELETES ALLOWED
+      allow delete: if false;
+    }
+    
+    // ============================================
+    // EXPENSES COLLECTION
+    // ============================================
+    
+    match /expenses/{expenseId} {
+      // Read rules
+      allow read: if requireAuth() && isUserActive() && (
+        isSuperAdmin() || // Super Admin: read all
+        (isAdmin() && isSameShop(resource.data.shopId)) || // Admin: read own shop
+        (isViewer() && isSameShop(resource.data.shopId)) // Viewer: read only
+      );
+      // Employee: no access (implicitly denied)
+      
+      // Create/Update: ONLY via Cloud Functions (deny client writes - financial mutations through CF only)
+      allow create: if false;
+      allow update: if false;
+      
+      // Delete rules - DENIED FOR ALL (prevent deletion)
+      allow delete: if false;
+    }
+    
+    // ============================================
+    // INVENTORY LOGS COLLECTION
+    // ============================================
+    
+    match /inventory_logs/{logId} {
+      // Read rules
+      allow read: if requireAuth() && isUserActive() && (
+        isSuperAdmin() || // Super Admin: read only
+        (isAdmin() && isSameShop(resource.data.shopId)) // Admin: read only (own shop)
+      );
+      // All others: no access (implicitly denied)
+      
+      // Create rules - DENIED FOR ALL (writes allowed ONLY via Cloud Functions)
+      allow create: if false;
+      
+      // Update rules - NO UPDATES ALLOWED
+      allow update: if false;
+      
+      // Delete rules - NO DELETES ALLOWED
+      allow delete: if false;
+    }
+    
+    // ============================================
+    // AUDIT LOGS COLLECTION
+    // ============================================
+    
+    match /audit_logs/{logId} {
+      // Read rules
+      allow read: if requireAuth() && isUserActive() && (
+        isSuperAdmin() || // Super Admin: read only
+        (isAdmin() && isSameShop(resource.data.shopId)) // Admin: read only (own shop)
+      );
+      // All others: no access (implicitly denied)
+      
+      // Create rules - DENIED FOR ALL (all writes denied from client)
+      allow create: if false;
+      
+      // Update rules - NO UPDATES ALLOWED
+      allow update: if false;
+      
+      // Delete rules - NO DELETES ALLOWED
+      allow delete: if false;
+    }
+    
+    // ============================================
+    // SETTINGS COLLECTION
+    // ============================================
+    
+    match /settings/{settingId} {
+      // Read rules
+      allow read: if requireAuth() && isUserActive() && (
+        isSuperAdmin() || // Super Admin: read all
+        (isAdmin() && resource.data.scope == 'shop' && exists(resource.data.shopId) && isSameShop(resource.data.shopId)) // Admin: read own shop settings
+      );
+      // All others: no access (implicitly denied)
+      
+      // Create rules
+      allow create: if requireAuth() && isUserActive() && (
+        isSuperAdmin() || // Super Admin: create all
+        (isAdmin() && request.resource.data.scope == 'shop' && validateShopId(request.resource.data.shopId)) // Admin: create own shop settings
+      ) &&
+      request.resource.data.keys().hasAll(['settingId', 'scope', 'key', 'value', 'updatedAt']) &&
+      request.resource.data.settingId == settingId &&
+      request.resource.data.scope is string &&
+      // Shop-level settings must have shopId
+      (request.resource.data.scope == 'system' || (request.resource.data.scope == 'shop' && request.resource.data.shopId is string));
+      
+      // Update rules
+      allow update: if requireAuth() && isUserActive() && (
+        isSuperAdmin() || // Super Admin: update all
+        (isAdmin() && resource.data.scope == 'shop' && exists(resource.data.shopId) && isSameShop(resource.data.shopId) && 
+         request.resource.data.scope == 'shop' && validateShopId(request.resource.data.shopId)) // Admin: update own shop settings
+      ) &&
+      request.resource.data.settingId == resource.data.settingId &&
+      request.resource.data.scope == resource.data.scope;
+      
+      // Delete rules
+      allow delete: if requireAuth() && isUserActive() && isSuperAdmin();
+    }
+    
+    // ============================================
+    // DEFAULT DENY RULE
+    // ============================================
+    
+    // Deny all other access by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
