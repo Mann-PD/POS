@@ -55,6 +55,7 @@ export {
 
 // Export expense callable functions (create/update with role validation)
 export {
+  createOrUpdateExpense,
   createExpense,
   updateExpense,
 } from './expenses/expenseAudit';
@@ -77,6 +78,8 @@ export {
   logLogout,
   logPasswordResetRequest,
   logPasswordResetComplete,
+  logAuthEvent,
+  bootstrapFirstUser,
 } from './auth/auth_audit';
 
 // Export authentication Firestore triggers

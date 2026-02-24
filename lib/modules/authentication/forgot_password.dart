@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 
 class ForgotPasswordScreen extends StatefulWidget {
   const ForgotPasswordScreen({super.key});
@@ -67,6 +68,17 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
 
     try {
       await _auth.sendPasswordResetEmail(email: _emailController.text.trim());
+
+      // Password reset requested - audit via callable (no direct Firestore write)
+      try {
+        final logAuthEvent = FirebaseFunctions.instance.httpsCallable('logAuthEvent');
+        await logAuthEvent.call(<String, dynamic>{
+          'action': 'PASSWORD_RESET',
+          'shopId': '', // User may not be authenticated when requesting reset
+        });
+      } catch (_) {
+        // Non-blocking
+      }
 
       if (mounted) {
         setState(() {

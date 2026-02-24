@@ -25,6 +25,7 @@ import * as functions from 'firebase-functions';
 import * as admin from 'firebase-admin';
 import { User, UserStatus } from '../types';
 import { validateRequiredString } from '../utils/validation';
+import { isValidRole, Role } from '../types/canonicalEnums';
 
 const db = admin.firestore();
 
@@ -360,6 +361,121 @@ export const logPasswordResetComplete = functions.https.onCall(async (data, cont
   } catch (error: any) {
     console.error('Error logging password reset completion:', error);
     return { success: false, error: error.message };
+  }
+});
+
+/**
+ * Callable: logAuthEvent
+ * Only callable by authenticated users. Appends one document to audit_logs.
+ * Rejects if unauthenticated, invalid role, or shop mismatch.
+ * No update or delete allowed (enforced by Firestore rules).
+ */
+export const logAuthEvent = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError(
+      'unauthenticated',
+      'User must be authenticated'
+    );
+  }
+
+  const userId = context.auth.uid;
+  const action = validateRequiredString(data?.action, 'action');
+  const shopId = validateRequiredString(data?.shopId, 'shopId');
+
+  const userDoc = await db.collection('users').doc(userId).get();
+  if (!userDoc.exists) {
+    throw new functions.https.HttpsError(
+      'not-found',
+      'User not found'
+    );
+  }
+
+  const user = userDoc.data() as User;
+
+  if (!isValidRole(user.role)) {
+    throw new functions.https.HttpsError(
+      'permission-denied',
+      'Invalid role'
+    );
+  }
+
+  if (user.status !== UserStatus.ACTIVE) {
+    throw new functions.https.HttpsError(
+      'permission-denied',
+      'User account is not active'
+    );
+  }
+
+  const shopMatch = user.role === Role.SuperAdmin || user.shopId === shopId;
+  if (!shopMatch) {
+    throw new functions.https.HttpsError(
+      'permission-denied',
+      'Shop mismatch'
+    );
+  }
+
+  const logId = db.collection('audit_logs').doc().id;
+  const timestamp = admin.firestore.Timestamp.now();
+
+  await db.collection('audit_logs').doc(logId).set({
+    userId: user.userId,
+    role: user.role,
+    shopId: user.shopId,
+    action,
+    entityType: 'AUTH',
+    timestamp,
+  });
+
+  return { success: true, logId };
+});
+
+/**
+ * Callable: bootstrap first user when no one is active.
+ * If there are zero users with status Active, sets the caller's status to Active.
+ * Use when the only admin is inactive and cannot log in (recovery).
+ */
+export const bootstrapFirstUser = functions.https.onCall(async (_data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError(
+      'unauthenticated',
+      'Must be signed in to request activation'
+    );
+  }
+
+  const uid = context.auth.uid;
+
+  try {
+    const userRef = db.collection('users').doc(uid);
+    const userSnap = await userRef.get();
+    if (!userSnap.exists) {
+      return { activated: false, reason: 'user_doc_not_found' };
+    }
+
+    const data = userSnap.data()!;
+    const status = (data.status ?? 'Inactive').toString().trim();
+
+    if (status === UserStatus.ACTIVE) {
+      return { activated: false, reason: 'already_active' };
+    }
+    if (status === UserStatus.SUSPENDED) {
+      return { activated: false, reason: 'suspended' };
+    }
+
+    const activeSnap = await db.collection('users')
+      .where('status', '==', 'Active')
+      .limit(1)
+      .get();
+
+    if (!activeSnap.empty) {
+      return { activated: false, reason: 'another_active_exists' };
+    }
+
+    await userRef.update({ status: 'Active' });
+    console.log(`Bootstrap: activated first user ${uid} (${data.email})`);
+    return { activated: true };
+  } catch (error: any) {
+    console.error('bootstrapFirstUser error:', error);
+    throw new functions.https.HttpsError('internal', error.message);
   }
 });
 

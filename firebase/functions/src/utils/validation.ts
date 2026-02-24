@@ -99,3 +99,32 @@ export function validateCustomerDetails(customerId: string, name: string, mobile
   validateRequiredString(name, 'Customer name');
   validateMobile(mobile);
 }
+
+/**
+ * Validates that a date is not in the future (for expense date etc.)
+ */
+export function validateNotFutureDate(value: any, fieldName: string): Date {
+  if (value == null) {
+    throw new Error(`${fieldName} is required`);
+  }
+  let date: Date;
+  if (value instanceof Date) {
+    date = value;
+  } else if (typeof value === 'object' && typeof (value as { seconds?: number }).seconds === 'number') {
+    date = new Date((value as { seconds: number }).seconds * 1000);
+  } else if (typeof value === 'number') {
+    date = new Date(value);
+  } else if (typeof value === 'string') {
+    date = new Date(value);
+  } else {
+    throw new Error(`${fieldName} must be a valid date`);
+  }
+  if (isNaN(date.getTime())) {
+    throw new Error(`${fieldName} must be a valid date`);
+  }
+  const now = new Date();
+  if (date.getTime() > now.getTime()) {
+    throw new Error(`${fieldName} must not be a future date`);
+  }
+  return date;
+}

@@ -122,11 +122,16 @@ class AuthController {
     return UserModel.fromMap(doc.data() as Map<String, dynamic>);
   }
 
-  /// Sign out - logs logout for audit then signs out
+  /// Sign out - audit via logAuthEvent then sign out (no direct Firestore write)
   Future<void> signOut() async {
     try {
-      final logLogout = FirebaseFunctions.instance.httpsCallable('logLogout');
-      await logLogout.call(<String, dynamic>{});
+      final userModel = await getCurrentUserModel();
+      final shopId = userModel?.shopId ?? '';
+      final logAuthEvent = FirebaseFunctions.instance.httpsCallable('logAuthEvent');
+      await logAuthEvent.call(<String, dynamic>{
+        'action': 'LOGOUT',
+        'shopId': shopId,
+      });
     } catch (_) {
       // Non-blocking; do not fail sign out if audit log fails
     }

@@ -77,10 +77,13 @@ class _LoginScreenState extends State<LoginScreen>
         _passwordController.text,
       );
 
-      // Login successful - log for audit
+      // Login successful - audit via callable (no direct Firestore write)
       try {
-        final logLoginSuccess = FirebaseFunctions.instance.httpsCallable('logLoginSuccess');
-        await logLoginSuccess.call(<String, dynamic>{});
+        final logAuthEvent = FirebaseFunctions.instance.httpsCallable('logAuthEvent');
+        await logAuthEvent.call(<String, dynamic>{
+          'action': 'LOGIN_SUCCESS',
+          'shopId': user.shopId,
+        });
       } catch (_) {
         // Non-blocking; do not fail login if audit log fails
       }
@@ -103,15 +106,15 @@ class _LoginScreenState extends State<LoginScreen>
         );
       }
     } catch (e) {
-      // Log login failure for audit
+      // Login failure - audit via callable (no direct Firestore write)
       try {
-        final logLoginFailure = FirebaseFunctions.instance.httpsCallable('logLoginFailure');
-        await logLoginFailure.call({
-          'email': _emailController.text.trim(),
-          'errorMessage': e.toString().replaceFirst('Exception: ', ''),
+        final logAuthEvent = FirebaseFunctions.instance.httpsCallable('logAuthEvent');
+        await logAuthEvent.call(<String, dynamic>{
+          'action': 'LOGIN_FAILURE',
+          'shopId': '', // Not authenticated; backend may accept or reject
         });
       } catch (_) {
-        // Non-blocking
+        // Non-blocking (e.g. unauthenticated call rejected)
       }
       if (mounted) {
         setState(() {

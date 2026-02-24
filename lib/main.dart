@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:get/get.dart';
 import 'dart:developer' as developer;
 import 'firebase_options.dart';
@@ -256,18 +257,39 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
   /// Fetches user data from Firestore and validates account status.
   /// Returns UserModel if valid, throws appropriate exceptions on failure.
+  /// Uses bootstrapFirstUser callable when inactive and no other active user exists.
   Future<UserModel> _fetchUserData(String userId) async {
     try {
-      final DocumentSnapshot userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(userId)
-          .get();
+      DocumentSnapshot userDoc;
+      try {
+        userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(userId)
+            .get();
+      } on FirebaseException catch (e) {
+        if (e.code == 'permission-denied') {
+          final result = await FirebaseFunctions.instance
+              .httpsCallable('bootstrapFirstUser')
+              .call<Map<String, dynamic>>();
+          final data = result.data;
+          if (data['activated'] == true) {
+            userDoc = await FirebaseFirestore.instance
+                .collection('users')
+                .doc(userId)
+                .get();
+          } else {
+            rethrow;
+          }
+        } else {
+          rethrow;
+        }
+      }
 
       if (!userDoc.exists) {
         throw Exception('User document not found');
       }
 
-      final UserModel user = UserModel.fromMap(
+      UserModel user = UserModel.fromMap(
         userDoc.data() as Map<String, dynamic>,
       );
 
@@ -278,7 +300,25 @@ class _AuthWrapperState extends State<AuthWrapper> {
             'Your account has been suspended. Contact administrator.',
           );
         }
-        throw Exception('Your account is inactive. Contact administrator.');
+        // Bootstrap via callable: server activates this account if no other user is Active
+        try {
+          final result = await FirebaseFunctions.instance
+              .httpsCallable('bootstrapFirstUser')
+              .call<Map<String, dynamic>>();
+          final data = result.data;
+          if (data['activated'] == true) {
+            developer.log(
+              'Bootstrap: account activated (no other active users)',
+              name: 'AuthWrapper',
+            );
+            user = user.copyWith(status: 'Active');
+          } else {
+            throw Exception('Your account is inactive. Contact administrator.');
+          }
+        } on FirebaseFunctionsException catch (e) {
+          developer.log('Bootstrap callable error: ${e.code} ${e.message}', name: 'AuthWrapper');
+          throw Exception('Your account is inactive. Contact administrator.');
+        }
       }
 
       // Validate role exists

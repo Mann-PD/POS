@@ -21,12 +21,29 @@
 
 import * as functions from 'firebase-functions';
 import * as admin from 'firebase-admin';
-import { Expense } from '../types';
+import { Expense, User } from '../types';
+import { Role } from '../types/canonicalEnums';
 import { validateAdminOrSuper } from '../utils/roleValidation';
-import { validateRequiredString, validatePositiveNumber } from '../utils/validation';
+import {
+  validateRequiredString,
+  validatePositiveNumber,
+  validateNotFutureDate,
+} from '../utils/validation';
 import { createAuditLog } from '../utils/auditLogger';
 
 const db = admin.firestore();
+
+type ExpenseAction = 'create' | 'update' | 'delete';
+
+interface CreateOrUpdateExpenseRequest {
+  action: ExpenseAction;
+  expenseId?: string;
+  shopId: string;
+  amount?: number;
+  description?: string;
+  /** Optional; if provided must not be a future date */
+  date?: string | number | { seconds: number } | Date;
+}
 
 interface CreateExpenseRequest {
   shopId: string;
@@ -40,6 +57,142 @@ interface UpdateExpenseRequest {
   amount?: number;
   description?: string;
 }
+
+/**
+ * Callable: createOrUpdateExpense
+ * Only Admin or SuperAdmin. Employees rejected. No delete for Admin; SuperAdmin may delete.
+ * Validates: amount > 0, no future date, shopId matches. Writes expense + audit_logs.
+ */
+export const createOrUpdateExpense = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'User must be authenticated');
+  }
+
+  const userId = context.auth.uid;
+  const req = data as CreateOrUpdateExpenseRequest;
+
+  const action = req?.action as ExpenseAction | undefined;
+  if (!action || !['create', 'update', 'delete'].includes(action)) {
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      'action must be one of: create, update, delete'
+    );
+  }
+
+  const shopId = validateRequiredString(req.shopId, 'shopId');
+
+  try {
+    // Only Admin or SuperAdmin (Employee is rejected by validateAdminOrSuper)
+    const user = await validateAdminOrSuper(userId, shopId);
+
+    if (action === 'delete') {
+      // No delete allowed for Admin; only SuperAdmin may delete (canonical: "SuperAdmin")
+      if (user.role !== Role.SuperAdmin) {
+        throw new functions.https.HttpsError(
+          'permission-denied',
+          'Only SuperAdmin may delete expenses. Delete not allowed for Admin.'
+        );
+      }
+      const expenseId = validateRequiredString(req.expenseId, 'expenseId');
+      const expenseRef = db.collection('expenses').doc(expenseId);
+      const expenseSnap = await expenseRef.get();
+      if (!expenseSnap.exists) {
+        throw new functions.https.HttpsError('not-found', 'Expense not found');
+      }
+      const expense = expenseSnap.data() as Expense;
+      if (expense.shopId !== shopId) {
+        throw new functions.https.HttpsError(
+          'permission-denied',
+          'Expense does not belong to this shop'
+        );
+      }
+      await expenseRef.delete();
+      await createAuditLog(user, 'expense_delete', 'expense', expenseId, {
+        amount: expense.amount,
+        description: expense.description,
+        shopId: expense.shopId,
+      });
+      return { success: true, action: 'delete', expenseId };
+    }
+
+    if (action === 'create') {
+      const amount = validatePositiveNumber(req.amount, 'amount');
+      const description = validateRequiredString(req.description, 'description');
+      if (req.date != null) {
+        validateNotFutureDate(req.date, 'date');
+      }
+      const now = admin.firestore.Timestamp.now();
+      const expenseId = db.collection('expenses').doc().id;
+      const expense: Expense = {
+        expenseId,
+        shopId,
+        amount,
+        description,
+        createdAt: now,
+      };
+      await db.collection('expenses').doc(expenseId).set(expense);
+      await createAuditLog(user, 'expense_create', 'expense', expenseId, {
+        amount,
+        description,
+        shopId,
+      });
+      return { success: true, action: 'create', expenseId, amount, description };
+    }
+
+    // action === 'update'
+    const expenseId = validateRequiredString(req.expenseId, 'expenseId');
+    const expenseRef = db.collection('expenses').doc(expenseId);
+    const expenseSnap = await expenseRef.get();
+    if (!expenseSnap.exists) {
+      throw new functions.https.HttpsError('not-found', 'Expense not found');
+    }
+    const existing = expenseSnap.data() as Expense;
+    if (existing.shopId !== shopId) {
+      throw new functions.https.HttpsError(
+        'permission-denied',
+        'Expense does not belong to this shop'
+      );
+    }
+    const updateData: Partial<Expense> = {};
+    if (req.amount !== undefined) {
+      updateData.amount = validatePositiveNumber(req.amount, 'amount');
+    }
+    if (req.description !== undefined) {
+      updateData.description = validateRequiredString(req.description, 'description');
+    }
+    if (req.date != null) {
+      validateNotFutureDate(req.date, 'date');
+    }
+    if (Object.keys(updateData).length === 0) {
+      throw new functions.https.HttpsError(
+        'invalid-argument',
+        'No fields to update (amount or description required)'
+      );
+    }
+    await expenseRef.update(updateData);
+    await createAuditLog(user, 'expense_update', 'expense', expenseId, {
+      shopId,
+      ...updateData,
+      previousAmount: existing.amount,
+      previousDescription: existing.description,
+    });
+    return {
+      success: true,
+      action: 'update',
+      expenseId,
+      updatedFields: Object.keys(updateData),
+    };
+  } catch (err: any) {
+    if (err instanceof functions.https.HttpsError) throw err;
+    if (err instanceof Error && err.message.includes('Access denied')) {
+      throw new functions.https.HttpsError('permission-denied', err.message);
+    }
+    throw new functions.https.HttpsError(
+      'internal',
+      err?.message ?? 'Failed to create or update expense'
+    );
+  }
+});
 
 /**
  * Callable function to create expense

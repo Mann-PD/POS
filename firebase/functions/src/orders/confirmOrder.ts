@@ -1,35 +1,28 @@
 /**
  * confirmOrder Cloud Function
- * 
- * TRIGGER TYPE: Callable HTTPS function
- * 
- * CRITICAL BUSINESS RULES ENFORCED:
- * - Validate authenticated user
- * - Validate user role == Employee
- * - Validate shopId match
- * - Validate order exists and is not confirmed/locked
- * - Validate paymentStatus == "Success"
- * - Deduct inventory atomically
- * - Prevent negative stock
- * - Lock order (orderStatus = "Locked")
- * - Write inventory_logs entries
- * - Write audit_logs entry
- * - Use Firestore transaction
- * - Reject duplicate confirmations
- * 
- * FORBIDDEN:
- * - Partial updates
- * - Frontend-trusted values
- * - Direct client inventory updates
+ *
+ * Callable HTTPS. Only role = Employee can call.
+ *
+ * Validates: authenticated, role == Employee, shopId match,
+ * orderStatus == pending, paymentStatus == Success.
+ *
+ * Transaction: lock order (orderStatus = locked), deduct inventory
+ * (stock never negative), create inventory_logs, create audit_logs.
+ * Orders are immutable after locking.
  */
 
 import * as functions from 'firebase-functions';
 import * as admin from 'firebase-admin';
-import { Order, OrderItem, Product, Customer, PaymentStatus, OrderStatus } from '../types';
+import {
+  Order,
+  OrderItem,
+  Product,
+  Customer,
+  User,
+} from '../types';
+import { OrderStatus, PaymentStatus } from '../types/canonicalEnums';
 import { validateEmployee } from '../utils/roleValidation';
 import { validateRequiredString } from '../utils/validation';
-import { createInventoryLog } from '../utils/inventoryLogs';
-import { createAuditLog } from '../utils/auditLogger';
 
 const db = admin.firestore();
 
@@ -39,7 +32,6 @@ interface ConfirmOrderRequest {
 }
 
 export const confirmOrder = functions.https.onCall(async (data, context) => {
-  // Validate authenticated user
   if (!context.auth) {
     throw new functions.https.HttpsError(
       'unauthenticated',
@@ -50,30 +42,31 @@ export const confirmOrder = functions.https.onCall(async (data, context) => {
   const userId = context.auth.uid;
   const request = data as ConfirmOrderRequest;
 
+  const orderId = validateRequiredString(request?.orderId, 'orderId');
+  const shopId = validateRequiredString(request?.shopId, 'shopId');
+
+  // Only role = Employee can call; shopId must match user's shop
+  let user: User;
   try {
-    // Validate request data - never trust frontend
-    const orderId = validateRequiredString(request.orderId, 'orderId');
-    const shopId = validateRequiredString(request.shopId, 'shopId');
+    user = await validateEmployee(userId, shopId);
+  } catch (e: any) {
+    throw new functions.https.HttpsError(
+      'permission-denied',
+      e?.message || 'Access denied. Only Employee role can confirm orders and shopId must match.'
+    );
+  }
 
-    // Validate employee role and shop access
-    const employee = await validateEmployee(userId, shopId);
-
-    // Use Firestore transaction for atomic operations
-    return await db.runTransaction(async (transaction) => {
-      // Get order - must exist
+  try {
+    const result = await db.runTransaction(async (transaction) => {
       const orderRef = db.collection('orders').doc(orderId);
-      const orderDoc = await transaction.get(orderRef);
+      const orderSnap = await transaction.get(orderRef);
 
-      if (!orderDoc.exists) {
-        throw new functions.https.HttpsError(
-          'not-found',
-          'Order not found'
-        );
+      if (!orderSnap.exists) {
+        throw new functions.https.HttpsError('not-found', 'Order not found');
       }
 
-      const order = orderDoc.data() as Order;
+      const order = orderSnap.data() as Order;
 
-      // Validate shopId match
       if (order.shopId !== shopId) {
         throw new functions.https.HttpsError(
           'permission-denied',
@@ -81,7 +74,6 @@ export const confirmOrder = functions.https.onCall(async (data, context) => {
         );
       }
 
-      // Validate employeeId match - only the assigned employee can confirm
       if (order.employeeId !== userId) {
         throw new functions.https.HttpsError(
           'permission-denied',
@@ -89,45 +81,31 @@ export const confirmOrder = functions.https.onCall(async (data, context) => {
         );
       }
 
-      // Validate order is not already confirmed/locked - reject duplicate confirmations
-      if (order.orderStatus === OrderStatus.LOCKED || order.orderStatus === OrderStatus.CONFIRMED) {
+      if (order.orderStatus !== OrderStatus.pending) {
         throw new functions.https.HttpsError(
           'failed-precondition',
-          'Order is already confirmed/locked'
+          order.orderStatus === OrderStatus.locked
+            ? 'Order is already locked; direct edits to locked orders are rejected.'
+            : order.orderStatus === OrderStatus.cancelled
+              ? 'Cannot confirm a cancelled order.'
+              : `Order must be pending. Current orderStatus: ${order.orderStatus}`
         );
       }
 
-      // Validate order is not cancelled
-      if (order.orderStatus === OrderStatus.CANCELLED) {
+      if (order.paymentStatus !== PaymentStatus.Success) {
         throw new functions.https.HttpsError(
           'failed-precondition',
-          'Cannot confirm a cancelled order'
+          `Order payment must be Success. Current paymentStatus: ${order.paymentStatus}`
         );
       }
 
-      // Validate paymentStatus == "Success" - critical business rule
-      if (order.paymentStatus !== PaymentStatus.SUCCESS) {
-        throw new functions.https.HttpsError(
-          'failed-precondition',
-          `Order payment must be successful. Current status: ${order.paymentStatus}`
-        );
-      }
-
-      // Get customer to validate it exists
-      const customerDoc = await transaction.get(
+      const customerSnap = await transaction.get(
         db.collection('customers').doc(order.customerId)
       );
-
-      if (!customerDoc.exists) {
-        throw new functions.https.HttpsError(
-          'not-found',
-          'Customer not found'
-        );
+      if (!customerSnap.exists) {
+        throw new functions.https.HttpsError('not-found', 'Customer not found');
       }
-
-      const customer = customerDoc.data() as Customer;
-
-      // Validate customer shopId matches
+      const customer = customerSnap.data() as Customer;
       if (customer.shopId !== shopId) {
         throw new functions.https.HttpsError(
           'permission-denied',
@@ -135,52 +113,43 @@ export const confirmOrder = functions.https.onCall(async (data, context) => {
         );
       }
 
-      // Get all order items
-      const orderItemsSnapshot = await transaction.get(
-        db.collection('order_items')
-          .where('orderId', '==', orderId)
+      const orderItemsSnap = await transaction.get(
+        db.collection('order_items').where('orderId', '==', orderId)
       );
-
-      if (orderItemsSnapshot.empty) {
+      if (orderItemsSnap.empty) {
         throw new functions.https.HttpsError(
           'failed-precondition',
           'Order has no items'
         );
       }
 
-      const orderItems: OrderItem[] = [];
-      const inventoryUpdates: Array<{ productRef: admin.firestore.DocumentReference; newStock: number; quantity: number }> = [];
+      const now = admin.firestore.Timestamp.now();
+      const inventoryUpdates: Array<{
+        productRef: admin.firestore.DocumentReference;
+        newStock: number;
+        quantity: number;
+        orderItem: OrderItem;
+      }> = [];
 
-      // Process each order item and validate stock
-      for (const itemDoc of orderItemsSnapshot.docs) {
+      for (const itemDoc of orderItemsSnap.docs) {
         const orderItem = itemDoc.data() as OrderItem;
-        orderItems.push(orderItem);
+        const productRef = db.collection('products').doc(orderItem.productId);
+        const productSnap = await transaction.get(productRef);
 
-        const productId = orderItem.productId;
-        const quantityOrWeight = orderItem.quantityOrWeight;
-
-        // Get product
-        const productRef = db.collection('products').doc(productId);
-        const productDoc = await transaction.get(productRef);
-
-        if (!productDoc.exists) {
+        if (!productSnap.exists) {
           throw new functions.https.HttpsError(
             'not-found',
-            `Product ${productId} not found`
+            `Product ${orderItem.productId} not found`
           );
         }
 
-        const product = productDoc.data() as Product;
-
-        // Validate product shopId
+        const product = productSnap.data() as Product;
         if (product.shopId !== shopId) {
           throw new functions.https.HttpsError(
             'permission-denied',
-            `Product ${productId} does not belong to this shop`
+            `Product ${orderItem.productId} does not belong to this shop`
           );
         }
-
-        // Validate product is active
         if (product.status !== 'active') {
           throw new functions.https.HttpsError(
             'failed-precondition',
@@ -188,108 +157,85 @@ export const confirmOrder = functions.https.onCall(async (data, context) => {
           );
         }
 
-        // Validate stock availability and prevent negative stock
-        if (product.stock < quantityOrWeight) {
+        const qty = orderItem.quantityOrWeight;
+        if (product.stock < qty) {
           throw new functions.https.HttpsError(
             'failed-precondition',
-            `Insufficient stock for ${product.name}. Available: ${product.stock}, Required: ${quantityOrWeight}`
+            `Insufficient stock. Product ${product.productId}: available ${product.stock}, required ${qty}. Stock cannot become negative.`
           );
         }
 
-        // Calculate new stock - prevent negative
-        const newStock = product.stock - quantityOrWeight;
+        const newStock = product.stock - qty;
         if (newStock < 0) {
           throw new functions.https.HttpsError(
             'failed-precondition',
-            `Stock cannot go below zero for ${product.name}`
+            'Stock cannot become negative'
           );
         }
 
-        // Store inventory update for atomic execution
         inventoryUpdates.push({
           productRef,
           newStock,
-          quantity: quantityOrWeight,
+          quantity: qty,
+          orderItem,
         });
       }
 
-      // Apply all inventory updates atomically
-      for (const update of inventoryUpdates) {
-        transaction.update(update.productRef, {
-          stock: update.newStock,
-        });
+      // Apply inventory deductions
+      for (const u of inventoryUpdates) {
+        transaction.update(u.productRef, { stock: u.newStock });
       }
 
-      // Lock order - set orderStatus = "Locked"
+      // Lock order (immutable after this)
       transaction.update(orderRef, {
-        orderStatus: OrderStatus.LOCKED,
+        orderStatus: OrderStatus.locked,
       });
 
-      // Return success data
+      // Create inventory_logs entries inside transaction
+      for (const u of inventoryUpdates) {
+        const logRef = db.collection('inventory_logs').doc();
+        transaction.set(logRef, {
+          logId: logRef.id,
+          productId: u.orderItem.productId,
+          shopId,
+          change: -u.quantity,
+          reason: `Order ${orderId} confirmation - stock deduction`,
+          createdAt: now,
+        });
+      }
+
+      // Create audit_logs entry: userId, role, shopId, action = ORDER_CONFIRMED
+      const auditRef = db.collection('audit_logs').doc();
+      transaction.set(auditRef, {
+        logId: auditRef.id,
+        userId: user.userId,
+        role: user.role,
+        shopId: user.shopId,
+        action: 'ORDER_CONFIRMED',
+        entityType: 'order',
+        entityId: orderId,
+        timestamp: now,
+        totalAmount: order.totalAmount,
+        paymentMethod: order.paymentMethod,
+        itemCount: orderItemsSnap.size,
+      });
+
       return {
         success: true,
         orderId,
-        orderStatus: OrderStatus.LOCKED,
+        orderStatus: OrderStatus.locked,
         totalAmount: order.totalAmount,
         paymentMethod: order.paymentMethod,
-        itemCount: orderItems.length,
+        itemCount: orderItemsSnap.size,
       };
-    }).then(async (result) => {
-      // After transaction succeeds, create inventory logs and audit log
-      // These are created outside the transaction to avoid transaction size limits
-      try {
-        // Get order items again for logging
-        const orderItemsSnapshot = await db.collection('order_items')
-          .where('orderId', '==', orderId)
-          .get();
-
-        // Create inventory logs for each product
-        for (const itemDoc of orderItemsSnapshot.docs) {
-          const orderItem = itemDoc.data() as OrderItem;
-          
-          await createInventoryLog(
-            orderItem.productId,
-            shopId,
-            -orderItem.quantityOrWeight, // Negative for deduction
-            `Order ${orderId} confirmation - Stock deduction`
-          );
-        }
-
-        // Create audit log entry
-        await createAuditLog(
-          employee,
-          'order_confirmed',
-          'order',
-          orderId,
-          {
-            totalAmount: result.totalAmount,
-            paymentMethod: result.paymentMethod,
-            itemCount: result.itemCount,
-            previousStatus: OrderStatus.PENDING,
-            newStatus: OrderStatus.LOCKED,
-          }
-        );
-
-        console.log(`Order ${orderId} confirmed and locked successfully`);
-      } catch (logError) {
-        // Log error but don't fail the function
-        // The order is already locked, so we log the error for investigation
-        console.error('Failed to create audit/inventory logs after order confirmation:', logError);
-      }
-
-      return result;
     });
 
-  } catch (error: any) {
-    console.error('Error confirming order:', error);
-    
-    if (error instanceof functions.https.HttpsError) {
-      throw error;
-    }
-
+    return result;
+  } catch (err: any) {
+    if (err instanceof functions.https.HttpsError) throw err;
     throw new functions.https.HttpsError(
       'internal',
-      `Failed to confirm order: ${error.message}`
+      err?.message || 'Failed to confirm order'
     );
   }
 });

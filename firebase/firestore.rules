@@ -34,9 +34,23 @@ service cloud.firestore {
         : null;
     }
     
+    // Canonical enum validation (reject unknown values)
+    function isValidRole(role) {
+      return role == 'SuperAdmin' || role == 'Admin' || role == 'Employee' || role == 'Viewer';
+    }
+    function isValidStatus(status) {
+      return status == 'Active' || status == 'Inactive' || status == 'Suspended';
+    }
+    function isValidOrderStatus(orderStatus) {
+      return orderStatus == 'pending' || orderStatus == 'locked' || orderStatus == 'cancelled';
+    }
+    function isValidPaymentStatus(paymentStatus) {
+      return paymentStatus == 'Success' || paymentStatus == 'Pending' || paymentStatus == 'Failed';
+    }
+    
     // Check if user is Super Admin
     function isSuperAdmin() {
-      return getUserRole() == 'Super Admin';
+      return getUserRole() == 'SuperAdmin';
     }
     
     // Check if user is Admin
@@ -100,7 +114,10 @@ service cloud.firestore {
       request.resource.data.role is string &&
       request.resource.data.shopId is string &&
       request.resource.data.status is string &&
-      request.resource.data.createdAt is timestamp;
+      request.resource.data.createdAt is timestamp &&
+      // Canonical enum validation (reject unknown values)
+      isValidRole(request.resource.data.role) &&
+      isValidStatus(request.resource.data.status);
       
       // Update rules
       allow update: if requireAuth() && isUserActive() && (
@@ -114,7 +131,10 @@ service cloud.firestore {
       request.resource.data.userId == resource.data.userId &&
       request.resource.data.createdAt == resource.data.createdAt &&
       // Prevent shopId change for non-Super Admin
-      (isSuperAdmin() || request.resource.data.shopId == resource.data.shopId);
+      (isSuperAdmin() || request.resource.data.shopId == resource.data.shopId) &&
+      // Canonical enum validation (reject unknown values)
+      isValidRole(request.resource.data.role) &&
+      isValidStatus(request.resource.data.status);
       
       // Delete rules
       allow delete: if requireAuth() && isUserActive() && isSuperAdmin();
@@ -172,7 +192,7 @@ service cloud.firestore {
       request.resource.data.stock >= 0 &&
       request.resource.data.createdAt is timestamp;
       
-      // Update rules
+      // Update rules - clients cannot modify stock (only Cloud Functions / Admin SDK can)
       allow update: if requireAuth() && isUserActive() && (
         isSuperAdmin() || // Super Admin: update all
         (isAdmin() && isSameShop(resource.data.shopId) && validateShopId(request.resource.data.shopId)) // Admin: update in own shop
@@ -181,6 +201,8 @@ service cloud.firestore {
       request.resource.data.shopId == resource.data.shopId &&
       request.resource.data.productId == resource.data.productId &&
       request.resource.data.createdAt == resource.data.createdAt &&
+      // Block direct writes to stock: stock may only be changed by Cloud Functions (Admin SDK bypasses rules)
+      request.resource.data.stock == resource.data.stock &&
       // Validate price > 0
       request.resource.data.price is number &&
       request.resource.data.price > 0 &&
@@ -296,12 +318,27 @@ service cloud.firestore {
       request.resource.data.totalAmount is number &&
       request.resource.data.totalAmount > 0 &&
       request.resource.data.paymentStatus == 'Success' &&
-      request.resource.data.createdAt is timestamp;
+      request.resource.data.createdAt is timestamp &&
+      // Canonical enum validation (reject unknown values)
+      isValidOrderStatus(request.resource.data.orderStatus) &&
+      isValidPaymentStatus(request.resource.data.paymentStatus);
       
-      // Update rules - NO UPDATES ALLOWED (no updates or deletes after creation)
-      allow update: if false;
+      // Update rules - prevent update if orderStatus == locked; only assigned employee can update pending orders
+      allow update: if requireAuth() && isUserActive() &&
+      resource.data.orderStatus != 'locked' &&
+      isEmployee() &&
+      isSameShop(resource.data.shopId) &&
+      resource.data.employeeId == request.auth.uid &&
+      validateShopId(request.resource.data.shopId) &&
+      request.resource.data.orderId == resource.data.orderId &&
+      request.resource.data.employeeId == resource.data.employeeId &&
+      request.resource.data.createdAt == resource.data.createdAt &&
+      request.resource.data.shopId == resource.data.shopId &&
+      request.resource.data.orderStatus == resource.data.orderStatus &&
+      isValidOrderStatus(request.resource.data.orderStatus) &&
+      isValidPaymentStatus(request.resource.data.paymentStatus);
       
-      // Delete rules - NO DELETES ALLOWED
+      // Delete rules - prevent delete entirely
       allow delete: if false;
     }
     
@@ -348,65 +385,52 @@ service cloud.firestore {
     // ============================================
     // EXPENSES COLLECTION
     // ============================================
-    
+    // Block all direct writes. Only Cloud Functions (Admin SDK) may write.
+    // request.auth.token.admin is not checkable for client writes (all client writes denied).
+    // Employees: no access (read or write).
+
     match /expenses/{expenseId} {
-      // Read rules
       allow read: if requireAuth() && isUserActive() && (
-        isSuperAdmin() || // Super Admin: read all
-        (isAdmin() && isSameShop(resource.data.shopId)) || // Admin: read own shop
-        (isViewer() && isSameShop(resource.data.shopId)) // Viewer: read only
+        isSuperAdmin() ||
+        (isAdmin() && isSameShop(resource.data.shopId)) ||
+        (isViewer() && isSameShop(resource.data.shopId))
       );
-      // Employee: no access (implicitly denied)
-      
-      // Create/Update: ONLY via Cloud Functions (deny client writes - financial mutations through CF only)
+      // Employees: no read (no allow rule for isEmployee())
+
       allow create: if false;
       allow update: if false;
-      
-      // Delete rules - DENIED FOR ALL (prevent deletion)
       allow delete: if false;
     }
     
     // ============================================
     // INVENTORY LOGS COLLECTION
     // ============================================
+    // Block all direct writes; only Cloud Functions (Admin SDK) may write.
     
     match /inventory_logs/{logId} {
-      // Read rules
       allow read: if requireAuth() && isUserActive() && (
         isSuperAdmin() || // Super Admin: read only
         (isAdmin() && isSameShop(resource.data.shopId)) // Admin: read only (own shop)
       );
-      // All others: no access (implicitly denied)
       
-      // Create rules - DENIED FOR ALL (writes allowed ONLY via Cloud Functions)
       allow create: if false;
-      
-      // Update rules - NO UPDATES ALLOWED
       allow update: if false;
-      
-      // Delete rules - NO DELETES ALLOWED
       allow delete: if false;
     }
     
     // ============================================
     // AUDIT LOGS COLLECTION
     // ============================================
+    // Append only (writes via Cloud Functions); no update; no delete.
     
     match /audit_logs/{logId} {
-      // Read rules
       allow read: if requireAuth() && isUserActive() && (
         isSuperAdmin() || // Super Admin: read only
         (isAdmin() && isSameShop(resource.data.shopId)) // Admin: read only (own shop)
       );
-      // All others: no access (implicitly denied)
       
-      // Create rules - DENIED FOR ALL (all writes denied from client)
       allow create: if false;
-      
-      // Update rules - NO UPDATES ALLOWED
       allow update: if false;
-      
-      // Delete rules - NO DELETES ALLOWED
       allow delete: if false;
     }
     
