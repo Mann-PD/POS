@@ -9,7 +9,7 @@ class ProductModel {
   final String
   measurementType; // kg, gm, piece, box — immutable after first sale
   final double stock; // must be >= 0
-  final String status; // Active, Disabled
+  final String status; // Canonical: Active, Inactive
   final DateTime createdAt; // immutable
 
   const ProductModel({
@@ -33,6 +33,15 @@ class ProductModel {
   /// Whether this product is available for sale (active + in stock)
   bool get isAvailable => isActive && stock > 0;
 
+  /// Canonical product status: Active, Inactive (matches backend)
+  static String _normalizeProductStatus(String? value) {
+    if (value == null || value.isEmpty) return 'Active';
+    final lower = value.toLowerCase().trim();
+    if (lower == 'active') return 'Active';
+    if (lower == 'inactive' || lower == 'disabled') return 'Inactive';
+    return value;
+  }
+
   factory ProductModel.fromMap(Map<String, dynamic> map) {
     return ProductModel(
       productId: map['productId'] as String? ?? '',
@@ -42,7 +51,7 @@ class ProductModel {
       price: (map['price'] as num?)?.toDouble() ?? 0,
       measurementType: map['measurementType'] as String? ?? 'piece',
       stock: (map['stock'] as num?)?.toDouble() ?? 0,
-      status: map['status'] as String? ?? 'Active',
+      status: _normalizeProductStatus(map['status'] as String?),
       createdAt: map['createdAt'] is Timestamp
           ? (map['createdAt'] as Timestamp).toDate()
           : DateTime.now(),

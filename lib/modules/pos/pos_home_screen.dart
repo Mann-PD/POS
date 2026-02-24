@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:get/get.dart';
 import 'package:pos_system/modules/pos/daily_sales_summary_screen.dart';
+import 'scan_product_screen.dart';
 import '../../data/models/product_model.dart';
 import '../../data/models/user_model.dart';
 import '../authentication/auth_controller.dart';
@@ -121,7 +122,7 @@ class _PosHomeScreenState extends State<PosHomeScreen> {
       return;
     }
 
-    if (product.status != 'active') {
+    if (product.status != 'Active') {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -209,6 +210,29 @@ class _PosHomeScreenState extends State<PosHomeScreen> {
         elevation: 0,
         actions: [
           IconButton(
+            icon: const Icon(Icons.qr_code_scanner),
+            onPressed: () {
+              if (_shopId == null) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Shop not loaded yet'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+                return;
+              }
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => ScanProductScreen(
+                    shopId: _shopId!,
+                    onProductScanned: _onProductTap,
+                  ),
+                ),
+              );
+            },
+            tooltip: 'Scan product barcode',
+          ),
+          IconButton(
             icon: const Icon(Icons.bar_chart),
             onPressed: () {
               Navigator.of(context).push(
@@ -283,7 +307,7 @@ class _PosHomeScreenState extends State<PosHomeScreen> {
                   stream: FirebaseFirestore.instance
                       .collection('categories')
                       .where('shopId', isEqualTo: _shopId)
-                      .where('status', isEqualTo: 'active')
+                      .where('status', isEqualTo: 'Active')
                       .snapshots(),
                   builder: (context, snapshot) {
                     if (!snapshot.hasData) {
@@ -334,7 +358,7 @@ class _PosHomeScreenState extends State<PosHomeScreen> {
               stream: FirebaseFirestore.instance
                   .collection('products')
                   .where('shopId', isEqualTo: _shopId)
-                  .where('status', isEqualTo: 'active')
+                  .where('status', isEqualTo: 'Active')
                   .snapshots(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {

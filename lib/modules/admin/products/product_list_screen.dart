@@ -72,14 +72,14 @@ class _ProductListScreenState extends State<ProductListScreen> {
           .collection('products')
           .doc(product.productId)
           .update({
-        'status': product.status == 'active' ? 'inactive' : 'active',
+        'status': product.status == 'Active' ? 'Inactive' : 'Active',
       });
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Product ${product.status == 'active' ? 'deactivated' : 'activated'}',
+              'Product ${product.status == 'Active' ? 'deactivated' : 'activated'}',
             ),
           ),
         );
@@ -155,8 +155,8 @@ class _ProductListScreenState extends State<ProductListScreen> {
                 child: Row(
                   children: [
                     _buildFilterChip('all', 'All'),
-                    _buildFilterChip('active', 'Active'),
-                    _buildFilterChip('inactive', 'Inactive'),
+                    _buildFilterChip('Active', 'Active'),
+                    _buildFilterChip('Inactive', 'Inactive'),
                   ],
                 ),
               )),
@@ -239,13 +239,13 @@ class _ProductListScreenState extends State<ProductListScreen> {
                   }
 
                   // Filter by status
-                  if (_controller.selectedFilter.value == 'active') {
+                  if (_controller.selectedFilter.value == 'Active') {
                     filteredProducts = filteredProducts
-                        .where((product) => product.status == 'active')
+                        .where((product) => product.status == 'Active')
                         .toList();
-                  } else if (_controller.selectedFilter.value == 'inactive') {
+                  } else if (_controller.selectedFilter.value == 'Inactive') {
                     filteredProducts = filteredProducts
-                        .where((product) => product.status == 'inactive')
+                        .where((product) => product.status == 'Inactive')
                         .toList();
                   }
 
@@ -292,7 +292,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
 
   Widget _buildProductCard(BuildContext context, ProductModel product) {
     final colorScheme = Theme.of(context).colorScheme;
-    final isActive = product.status == 'active';
+    final isActive = product.status == 'Active';
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),

@@ -57,8 +57,8 @@ class AuthController {
         throw Exception('No role assigned. Please contact administrator.');
       }
 
-      // Step 5: Validate shopId for non-Super Admin users (canonical role)
-      if (user.role != 'Super Admin' && user.shopId.isEmpty) {
+      // Step 5: Validate shopId for non-SuperAdmin users (canonical role)
+      if (user.role != 'SuperAdmin' && user.shopId.isEmpty) {
         await _auth.signOut();
         throw Exception('No shop assigned. Please contact administrator.');
       }

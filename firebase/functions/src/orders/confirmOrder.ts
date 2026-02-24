@@ -150,7 +150,7 @@ export const confirmOrder = functions.https.onCall(async (data, context) => {
             `Product ${orderItem.productId} does not belong to this shop`
           );
         }
-        if (product.status !== 'active') {
+        if (product.status !== 'Active') {
           throw new functions.https.HttpsError(
             'failed-precondition',
             `Product ${product.name} is not active`

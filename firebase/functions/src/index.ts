@@ -82,6 +82,11 @@ export {
   bootstrapFirstUser,
 } from './auth/auth_audit';
 
+// Session management (concurrent login restriction)
+export {
+  setActiveSession,
+} from './auth/session';
+
 // Export authentication Firestore triggers
 export {
   onUserStatusChange,

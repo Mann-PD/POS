@@ -10,7 +10,7 @@ class OrderModel {
   final double totalAmount; // calculated
   final String paymentMethod; // Cash, UPI, Card
   final String paymentStatus; // Success
-  final String orderStatus; // Completed, Cancelled
+  final String orderStatus; // pending, locked, cancelled (canonical)
   final DateTime createdAt; // immutable
 
   const OrderModel({
@@ -28,10 +28,15 @@ class OrderModel {
   });
 
   /// Whether this order is completed and locked
-  bool get isCompleted => orderStatus == 'Completed';
+  bool get isCompleted =>
+      orderStatus.toLowerCase() == 'locked';
 
   /// Whether this order was cancelled
-  bool get isCancelled => orderStatus == 'Cancelled';
+  bool get isCancelled =>
+      orderStatus.toLowerCase() == 'cancelled';
+
+  /// Whether this order is still pending (can be cancelled)
+  bool get isPending => orderStatus.toLowerCase() == 'pending';
 
   factory OrderModel.fromMap(Map<String, dynamic> map) {
     return OrderModel(

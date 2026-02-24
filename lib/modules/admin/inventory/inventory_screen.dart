@@ -274,8 +274,8 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 child: Row(
                   children: [
                     _buildFilterChip('all', 'All'),
-                    _buildFilterChip('active', 'Active'),
-                    _buildFilterChip('inactive', 'Inactive'),
+                    _buildFilterChip('Active', 'Active'),
+                    _buildFilterChip('Inactive', 'Inactive'),
                     _buildFilterChip('low-stock', 'Low Stock'),
                     _buildFilterChip('out-of-stock', 'Out of Stock'),
                   ],
@@ -353,13 +353,13 @@ class _InventoryScreenState extends State<InventoryScreen> {
                   }
 
                   // Filter by status
-                  if (_controller.selectedFilter.value == 'active') {
+                  if (_controller.selectedFilter.value == 'Active') {
                     filteredProducts = filteredProducts
-                        .where((product) => product.status == 'active')
+                        .where((product) => product.status == 'Active')
                         .toList();
-                  } else if (_controller.selectedFilter.value == 'inactive') {
+                  } else if (_controller.selectedFilter.value == 'Inactive') {
                     filteredProducts = filteredProducts
-                        .where((product) => product.status == 'inactive')
+                        .where((product) => product.status == 'Inactive')
                         .toList();
                   } else if (_controller.selectedFilter.value == 'low-stock') {
                     filteredProducts = filteredProducts
@@ -416,7 +416,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
     final colorScheme = Theme.of(context).colorScheme;
     final isOutOfStock = product.stock <= 0;
     final isLowStock = product.stock > 0 && product.stock <= 10;
-    final isActive = product.status == 'active';
+    final isActive = product.status == 'Active';
 
     Color stockColor;
     IconData stockIcon;

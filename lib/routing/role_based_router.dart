@@ -14,8 +14,8 @@ class RoleBasedRouter {
   /// Returns the route string for the user's dashboard:
   /// - 'employee' → Employee dashboard (POS home)
   /// - 'admin' → Admin dashboard
-  /// - 'super_admin' → Super Admin dashboard
-  /// - 'viewer' → Viewer dashboard
+  /// - 'super_admin' → SuperAdmin dashboard
+  /// - 'viewer' → Viewer reports dashboard (read-only)
   ///
   /// Accepts standard role values (case-insensitive): super_admin, admin, employee, viewer.
   /// 

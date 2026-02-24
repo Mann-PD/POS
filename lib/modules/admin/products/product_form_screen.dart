@@ -40,7 +40,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       _priceController.text = widget.product!.price.toString();
       _stockController.text = widget.product!.stock.toString();
       _unit = widget.product!.measurementType;
-      _isActive = widget.product!.status == 'active';
+      _isActive = widget.product!.status == 'Active';
     }
     _loadUserData();
   }
@@ -115,7 +115,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
           'name': _nameController.text.trim(),
           'price': price,
           'stock': stock,
-          'status': _isActive ? 'active' : 'inactive',
+          'status': _isActive ? 'Active' : 'Inactive',
           // Note: measurementType is immutable after first sale
         });
 
@@ -140,7 +140,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
           'price': price,
           'measurementType': _unit,
           'stock': stock,
-          'status': _isActive ? 'active' : 'inactive',
+          'status': _isActive ? 'Active' : 'Inactive',
           'createdAt': FieldValue.serverTimestamp(),
         });
 

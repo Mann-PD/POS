@@ -9,10 +9,13 @@ import 'firebase_options.dart';
 import 'data/models/user_model.dart';
 import 'modules/authentication/auth_controller.dart';
 import 'modules/authentication/login_screen.dart';
+import 'modules/authentication/inactivity_wrapper.dart';
+import 'modules/authentication/session_manager.dart';
 import 'modules/pos/pos_home_screen.dart';
 import 'modules/pos/controllers/cart_controller.dart';
 import 'modules/admin/admin_dashboard.dart';
 import 'modules/super_admin/super_admin_dashboard.dart';
+import 'modules/reports/viewer_reports_dashboard.dart';
 import 'routing/app_routes.dart';
 import 'routing/role_based_router.dart';
 
@@ -52,9 +55,11 @@ class MyApp extends StatelessWidget {
         AppRoutes.employeeDashboard: (context) => const PosHomeScreen(),
         AppRoutes.adminDashboard: (context) => const AdminDashboard(),
         AppRoutes.superAdminDashboard: (context) => const SuperAdminDashboard(),
-        AppRoutes.viewerDashboard: (context) => const PosHomeScreen(),
+        AppRoutes.viewerDashboard: (context) => const ViewerReportsDashboard(),
       },
-      home: const AuthWrapper(),
+      home: const InactivityWrapper(
+        child: AuthWrapper(),
+      ),
     );
   }
 }
@@ -289,9 +294,22 @@ class _AuthWrapperState extends State<AuthWrapper> {
         throw Exception('User document not found');
       }
 
-      UserModel user = UserModel.fromMap(
-        userDoc.data() as Map<String, dynamic>,
+      final data = userDoc.data() as Map<String, dynamic>;
+
+      // Concurrent login restriction (optional advanced): if a remote
+      // activeSessionId exists and does not match this device, treat as invalid.
+      final remoteSessionId = data['activeSessionId'] as String?;
+      final isActiveHere = await SessionManager.isCurrentDeviceActive(
+        userId,
+        remoteSessionId,
       );
+      if (!isActiveHere) {
+        throw Exception(
+          'Your session has been closed because your account was used on another device.',
+        );
+      }
+
+      UserModel user = UserModel.fromMap(data);
 
       // Check account status
       if (!user.isActive) {
@@ -326,8 +344,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
         throw Exception('User role is empty');
       }
 
-      // Validate shopId for non-Super Admin (canonical role)
-      if (user.role != 'Super Admin' && user.shopId.isEmpty) {
+      // Validate shopId for non-SuperAdmin (canonical role)
+      if (user.role != 'SuperAdmin' && user.shopId.isEmpty) {
         throw Exception('No shop assigned. Contact administrator.');
       }
 

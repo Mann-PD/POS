@@ -71,14 +71,14 @@ class _ProductListScreenState extends State<ProductListScreen> {
           .collection('products')
           .doc(product.productId)
           .update({
-        'status': product.status == 'active' ? 'inactive' : 'active',
+        'status': product.status == 'Active' ? 'Inactive' : 'Active',
       });
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Product ${product.status == 'active' ? 'deactivated' : 'activated'}',
+              'Product ${product.status == 'Active' ? 'deactivated' : 'activated'}',
             ),
           ),
         );
@@ -152,8 +152,8 @@ class _ProductListScreenState extends State<ProductListScreen> {
                 child: Row(
                   children: [
                     _buildFilterChip('all', 'All'),
-                    _buildFilterChip('active', 'Active'),
-                    _buildFilterChip('inactive', 'Inactive'),
+                    _buildFilterChip('Active', 'Active'),
+                    _buildFilterChip('Inactive', 'Inactive'),
                     _buildFilterChip('low-stock', 'Low Stock'),
                   ],
                 ),
@@ -237,13 +237,13 @@ class _ProductListScreenState extends State<ProductListScreen> {
                   }
 
                   // Filter by status
-                  if (_uiController.selectedFilter.value == 'active') {
+                  if (_uiController.selectedFilter.value == 'Active') {
                     filteredProducts = filteredProducts
-                        .where((product) => product.status == 'active')
+                        .where((product) => product.status == 'Active')
                         .toList();
-                  } else if (_uiController.selectedFilter.value == 'inactive') {
+                  } else if (_uiController.selectedFilter.value == 'Inactive') {
                     filteredProducts = filteredProducts
-                        .where((product) => product.status == 'inactive')
+                        .where((product) => product.status == 'Inactive')
                         .toList();
                   } else if (_uiController.selectedFilter.value == 'low-stock') {
                     filteredProducts = filteredProducts
@@ -295,7 +295,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
   Widget _buildProductCard(BuildContext context, ProductModel product) {
     final colorScheme = Theme.of(context).colorScheme;
     final isLowStock = product.stock <= 10;
-    final isDisabled = product.status == 'inactive';
+    final isDisabled = product.status == 'Inactive';
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -370,11 +370,11 @@ class _ProductListScreenState extends State<ProductListScreen> {
               child: Row(
                 children: [
                   Icon(
-                    product.status == 'active' ? Icons.block : Icons.check_circle,
+                    product.status == 'Active' ? Icons.block : Icons.check_circle,
                     size: 20,
                   ),
                   const SizedBox(width: 8),
-                  Text(product.status == 'active' ? 'Disable' : 'Enable'),
+                  Text(product.status == 'Active' ? 'Disable' : 'Enable'),
                 ],
               ),
             ),

@@ -7,6 +7,7 @@ import '../inventory/inventory_screen.dart';
 import 'screens/employee_list_screen.dart';
 import '../expenses/expense_screen.dart';
 import '../reports/reports_dashboard.dart';
+import '../orders/order_history_screen.dart';
 
 /// Admin Dashboard - Entry screen for admin users
 /// Provides navigation to all admin management modules
@@ -45,7 +46,7 @@ class AdminDashboard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final controller = Get.put(AdminController());
+    Get.put(AdminController());
     final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
@@ -204,6 +205,8 @@ class AdminDashboard extends StatelessWidget {
               const SizedBox(height: 16),
 
               _buildReportsCard(context),
+              const SizedBox(height: 16),
+              _buildOrderHistoryCard(context),
             ],
           ),
         ),
@@ -300,6 +303,69 @@ class AdminDashboard extends StatelessWidget {
                     const SizedBox(height: 4),
                     Text(
                       'View sales reports and business insights',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.chevron_right,
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOrderHistoryCard(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Card(
+      elevation: 2,
+      child: InkWell(
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => const OrderHistoryScreen(),
+            ),
+          );
+        },
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: colorScheme.tertiaryContainer,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.receipt_long,
+                  size: 32,
+                  color: colorScheme.onTertiaryContainer,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Order History',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'List orders, view details, cancel pending',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                             color: colorScheme.onSurfaceVariant,
                           ),

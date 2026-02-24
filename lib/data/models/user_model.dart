@@ -27,11 +27,11 @@ class UserModel {
   /// Whether this user is suspended
   bool get isSuspended => status == 'Suspended';
 
-  /// Normalize role to canonical: Super Admin, Admin, Employee, Viewer
+  /// Normalize role to canonical: SuperAdmin, Admin, Employee, Viewer (matches Firestore/backend)
   static String _normalizeRole(String? value) {
     if (value == null || value.isEmpty) return '';
-    final lower = value.toLowerCase();
-    if (lower == 'super admin' || lower == 'super_admin') return 'Super Admin';
+    final lower = value.toLowerCase().replaceAll(RegExp(r'[_\s-]'), '');
+    if (lower == 'superadmin') return 'SuperAdmin';
     if (lower == 'admin') return 'Admin';
     if (lower == 'employee') return 'Employee';
     if (lower == 'viewer') return 'Viewer';

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'auth_controller.dart';
+import 'session_manager.dart';
 import 'forgot_password.dart';
 import '../../data/models/user_model.dart';
 
@@ -88,6 +89,9 @@ class _LoginScreenState extends State<LoginScreen>
         // Non-blocking; do not fail login if audit log fails
       }
 
+      // Register active session for concurrent-login control (best-effort).
+      await SessionManager.registerActiveSession(user.userId);
+
       // Login successful - user is authenticated
       // Navigation will be handled by routing system
       if (mounted) {
@@ -106,15 +110,15 @@ class _LoginScreenState extends State<LoginScreen>
         );
       }
     } catch (e) {
-      // Login failure - audit via callable (no direct Firestore write)
+      // Login failure — audit via logLoginFailure (unauthenticated callable; logAuthEvent requires auth)
       try {
-        final logAuthEvent = FirebaseFunctions.instance.httpsCallable('logAuthEvent');
-        await logAuthEvent.call(<String, dynamic>{
-          'action': 'LOGIN_FAILURE',
-          'shopId': '', // Not authenticated; backend may accept or reject
+        final logLoginFailure = FirebaseFunctions.instance.httpsCallable('logLoginFailure');
+        await logLoginFailure.call(<String, dynamic>{
+          'email': _emailController.text.trim(),
+          'errorMessage': e.toString().replaceFirst('Exception: ', ''),
         });
       } catch (_) {
-        // Non-blocking (e.g. unauthenticated call rejected)
+        // Non-blocking; do not fail UX if audit log fails
       }
       if (mounted) {
         setState(() {

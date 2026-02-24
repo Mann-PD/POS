@@ -135,7 +135,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
           'price': price,
           'measurementType': _measurementType,
           'stock': stock,
-          'status': 'active',
+          'status': 'Active',
           'createdAt': FieldValue.serverTimestamp(),
         });
 

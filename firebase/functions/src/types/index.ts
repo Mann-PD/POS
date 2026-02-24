@@ -5,7 +5,7 @@
 
 /** Canonical role values - must match Firestore rules and Flutter */
 export enum UserRole {
-  SUPER_ADMIN = 'Super Admin',
+  SUPER_ADMIN = 'SuperAdmin',
   ADMIN = 'Admin',
   EMPLOYEE = 'Employee',
   VIEWER = 'Viewer'
@@ -19,7 +19,7 @@ export enum UserStatus {
 }
 
 export enum ProductStatus {
-  ACTIVE = 'active',
+  ACTIVE = 'Active',
   DISABLED = 'disabled'
 }
 
