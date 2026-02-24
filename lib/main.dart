@@ -331,11 +331,21 @@ class _AuthWrapperState extends State<AuthWrapper> {
             );
             user = user.copyWith(status: 'Active');
           } else {
+            // Callable ran successfully but chose NOT to activate this user.
+            // This is an intentional account-status decision.
             throw Exception('Your account is inactive. Contact administrator.');
           }
         } on FirebaseFunctionsException catch (e) {
-          developer.log('Bootstrap callable error: ${e.code} ${e.message}', name: 'AuthWrapper');
-          throw Exception('Your account is inactive. Contact administrator.');
+          developer.log(
+            'Bootstrap callable error: ${e.code} ${e.message}',
+            name: 'AuthWrapper',
+          );
+          // Treat callable failures (e.g. INTERNAL) as infrastructure issues,
+          // not as "account inactive" so that AuthWrapper shows the retry UI
+          // instead of auto-signing the user out.
+          throw Exception(
+            'bootstrapFirstUser failed (${e.code}). Please try again or contact administrator.',
+          );
         }
       }
 
