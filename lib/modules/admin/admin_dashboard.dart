@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:get/get.dart';
 import '../authentication/auth_controller.dart';
 import 'admin_controller.dart';
@@ -7,12 +9,80 @@ import '../inventory/inventory_screen.dart';
 import 'screens/employee_list_screen.dart';
 import '../expenses/expense_screen.dart';
 import '../reports/reports_dashboard.dart';
+import '../reports/reports_service.dart';
 import '../orders/order_history_screen.dart';
+import 'audit_logs_screen.dart';
+import 'settings_screen.dart';
+import '../../data/models/order_model.dart';
+import '../../data/models/user_model.dart';
 
 /// Admin Dashboard - Entry screen for admin users
-/// Provides navigation to all admin management modules
-class AdminDashboard extends StatelessWidget {
+/// Displays today's sales, order count, low-stock alerts, recent orders; navigation to modules.
+class AdminDashboard extends StatefulWidget {
   const AdminDashboard({super.key});
+
+  @override
+  State<AdminDashboard> createState() => _AdminDashboardState();
+}
+
+class _AdminDashboardState extends State<AdminDashboard> {
+  bool _loading = true;
+  double _todaySales = 0;
+  int _todayOrderCount = 0;
+  int _lowStockCount = 0;
+  List<OrderModel> _recentOrders = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUserAndSummary();
+  }
+
+  Future<void> _loadUserAndSummary() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      setState(() => _loading = false);
+      return;
+    }
+    try {
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      if (!userDoc.exists) {
+        setState(() => _loading = false);
+        return;
+      }
+      final userData = UserModel.fromMap(
+        userDoc.data() as Map<String, dynamic>,
+      );
+      final shopId = userData.shopId;
+
+      final reports = ReportsService();
+      final summary = await reports.getTodaySalesSummary(
+        shopId: shopId.isEmpty ? null : shopId,
+      );
+      int lowStock = 0;
+      if (shopId.isNotEmpty) {
+        lowStock = await reports.getLowStockCount(shopId: shopId);
+      }
+      final recent = await reports.getRecentLockedOrders(
+        shopId: shopId.isEmpty ? null : shopId,
+        limit: 5,
+      );
+      if (mounted) {
+        setState(() {
+          _todaySales = (summary['totalSales'] as num?)?.toDouble() ?? 0;
+          _todayOrderCount = summary['orderCount'] as int? ?? 0;
+          _lowStockCount = lowStock;
+          _recentOrders = recent;
+          _loading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
 
   Future<void> _handleLogout(BuildContext context) async {
     final confirm = await showDialog<bool>(
@@ -36,12 +106,166 @@ class AdminDashboard extends StatelessWidget {
     if (confirm == true && context.mounted) {
       await AuthController().signOut();
       if (context.mounted) {
-        Navigator.of(context).pushNamedAndRemoveUntil(
-          '/login',
-          (route) => false,
-        );
+        Navigator.of(
+          context,
+        ).pushNamedAndRemoveUntil('/login', (route) => false);
       }
     }
+  }
+
+  Widget _buildSummarySection(BuildContext context, ColorScheme colorScheme) {
+    if (_loading) {
+      return const Card(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Center(child: CircularProgressIndicator()),
+        ),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          "Today's Overview",
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.bold,
+            color: colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: Card(
+                elevation: 2,
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        "Today's Sales",
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '₹${_todaySales.toStringAsFixed(0)}',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: colorScheme.primary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Card(
+                elevation: 2,
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Orders',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '$_todayOrderCount',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Card(
+                elevation: 2,
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Low Stock',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '$_lowStockCount',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: _lowStockCount > 0
+                              ? colorScheme.error
+                              : colorScheme.onSurface,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        if (_recentOrders.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          Text(
+            'Recent Orders',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.bold,
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Card(
+            elevation: 2,
+            child: ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _recentOrders.length,
+              separatorBuilder: (_, __) => const Divider(height: 1),
+              itemBuilder: (context, index) {
+                final order = _recentOrders[index];
+                return ListTile(
+                  title: Text(
+                    order.orderId.length > 12
+                        ? '${order.orderId.substring(0, 12)}...'
+                        : order.orderId,
+                    style: const TextStyle(fontWeight: FontWeight.w500),
+                  ),
+                  subtitle: Text(
+                    '₹${order.totalAmount.toStringAsFixed(0)} • ${order.orderStatus}',
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const OrderHistoryScreen(),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
+      ],
+    );
   }
 
   @override
@@ -89,19 +313,13 @@ class AdminDashboard extends StatelessWidget {
                           children: [
                             Text(
                               'Admin Dashboard',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .headlineSmall
-                                  ?.copyWith(
-                                    fontWeight: FontWeight.bold,
-                                  ),
+                              style: Theme.of(context).textTheme.headlineSmall
+                                  ?.copyWith(fontWeight: FontWeight.bold),
                             ),
                             const SizedBox(height: 4),
                             Text(
                               'Manage your shop operations',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodyMedium
+                              style: Theme.of(context).textTheme.bodyMedium
                                   ?.copyWith(
                                     color: colorScheme.onSurfaceVariant,
                                   ),
@@ -114,14 +332,19 @@ class AdminDashboard extends StatelessWidget {
                 ),
               ),
 
+              const SizedBox(height: 24),
+
+              // Today's overview summary
+              _buildSummarySection(context, colorScheme),
+
               const SizedBox(height: 32),
 
               // Management modules section
               Text(
                 'Management Modules',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 16),
 
@@ -198,15 +421,19 @@ class AdminDashboard extends StatelessWidget {
               // Reports section
               Text(
                 'Reports & Analytics',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 16),
 
               _buildReportsCard(context),
               const SizedBox(height: 16),
               _buildOrderHistoryCard(context),
+              const SizedBox(height: 16),
+              _buildAuditLogsCard(context),
+              const SizedBox(height: 16),
+              _buildSettingsCard(context),
             ],
           ),
         ),
@@ -227,29 +454,28 @@ class AdminDashboard extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(12),
         child: Padding(
-          padding: const EdgeInsets.all(20),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: color.withOpacity(0.1),
+                  color: color.withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
-                child: Icon(
-                  icon,
-                  size: 32,
-                  color: color,
-                ),
+                child: Icon(icon, size: 26, color: color),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 6),
               Text(
                 title,
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
                 textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
             ],
           ),
@@ -267,9 +493,7 @@ class AdminDashboard extends StatelessWidget {
         onTap: () {
           Navigator.push(
             context,
-            MaterialPageRoute(
-              builder: (context) => const ReportsDashboard(),
-            ),
+            MaterialPageRoute(builder: (context) => const ReportsDashboard()),
           );
         },
         borderRadius: BorderRadius.circular(12),
@@ -297,23 +521,20 @@ class AdminDashboard extends StatelessWidget {
                     Text(
                       'Reports & Analytics',
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       'View sales reports and business insights',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: colorScheme.onSurfaceVariant,
-                          ),
+                        color: colorScheme.onSurfaceVariant,
+                      ),
                     ),
                   ],
                 ),
               ),
-              Icon(
-                Icons.chevron_right,
-                color: colorScheme.onSurfaceVariant,
-              ),
+              Icon(Icons.chevron_right, color: colorScheme.onSurfaceVariant),
             ],
           ),
         ),
@@ -330,9 +551,7 @@ class AdminDashboard extends StatelessWidget {
         onTap: () {
           Navigator.push(
             context,
-            MaterialPageRoute(
-              builder: (context) => const OrderHistoryScreen(),
-            ),
+            MaterialPageRoute(builder: (context) => const OrderHistoryScreen()),
           );
         },
         borderRadius: BorderRadius.circular(12),
@@ -360,23 +579,136 @@ class AdminDashboard extends StatelessWidget {
                     Text(
                       'Order History',
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       'List orders, view details, cancel pending',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: colorScheme.onSurfaceVariant,
-                          ),
+                        color: colorScheme.onSurfaceVariant,
+                      ),
                     ),
                   ],
                 ),
               ),
-              Icon(
-                Icons.chevron_right,
-                color: colorScheme.onSurfaceVariant,
+              Icon(Icons.chevron_right, color: colorScheme.onSurfaceVariant),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAuditLogsCard(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Card(
+      elevation: 2,
+      child: InkWell(
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => const AuditLogsScreen()),
+          );
+        },
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: colorScheme.secondaryContainer,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.history,
+                  size: 32,
+                  color: colorScheme.onSecondaryContainer,
+                ),
               ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Audit Logs',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'View activity and compliance logs',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right, color: colorScheme.onSurfaceVariant),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSettingsCard(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Card(
+      elevation: 2,
+      child: InkWell(
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => const SettingsScreen()),
+          );
+        },
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: colorScheme.surfaceContainerHighest,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.settings,
+                  size: 32,
+                  color: colorScheme.onSurface,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Settings',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Shop and operational settings',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right, color: colorScheme.onSurfaceVariant),
             ],
           ),
         ),

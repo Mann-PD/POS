@@ -68,6 +68,16 @@ class AuthController {
         name: 'AuthController',
       );
 
+      try {
+        final logAuthEvent = FirebaseFunctions.instance.httpsCallable('logAuthEvent');
+        await logAuthEvent.call(<String, dynamic>{
+          'action': 'LOGIN_SUCCESS',
+          'shopId': user.shopId,
+        });
+      } catch (e) {
+        developer.log('Failed to write login audit log: $e', name: 'AuthController');
+      }
+
       return user;
     } on FirebaseAuthException catch (e) {
       String errorMessage;
@@ -96,6 +106,18 @@ class AuthController {
         default:
           errorMessage = 'Login failed. Please try again.';
       }
+      
+      try {
+        final logAuthEvent = FirebaseFunctions.instance.httpsCallable('logAuthEvent');
+        await logAuthEvent.call(<String, dynamic>{
+          'action': 'LOGIN_FAILURE',
+          'shopId': '', // Unknown shop ID for failed login
+          'details': 'Email: $email. Error: $errorMessage',
+        });
+      } catch (_) {
+        // Ignore failure in audit logging
+      }
+      
       throw Exception(errorMessage);
     } catch (e) {
       if (e is Exception) {

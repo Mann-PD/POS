@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import '../authentication/auth_controller.dart';
+import '../admin/audit_logs_screen.dart';
+import '../admin/settings_screen.dart';
+import 'create_shop_screen.dart';
 import 'user_management_screen.dart';
 
 class SuperAdminDashboard extends StatelessWidget {
@@ -8,10 +11,7 @@ class SuperAdminDashboard extends StatelessWidget {
   Future<void> _handleLogout(BuildContext context) async {
     await AuthController().signOut();
     if (context.mounted) {
-      Navigator.of(context).pushNamedAndRemoveUntil(
-        '/login',
-        (route) => false,
-      );
+      Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
     }
   }
 
@@ -43,10 +43,37 @@ class SuperAdminDashboard extends StatelessWidget {
               Text(
                 'Super Admin Dashboard',
                 style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               const SizedBox(height: 48),
+              FilledButton.icon(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const CreateShopScreen(),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.store),
+                label: const Text('Create Shop'),
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 16,
+                  ),
+                  minimumSize: const Size(double.infinity, 48),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Add a shop before creating Admin users',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 16),
               FilledButton.icon(
                 onPressed: () {
                   Navigator.push(
@@ -59,7 +86,10 @@ class SuperAdminDashboard extends StatelessWidget {
                 icon: const Icon(Icons.people),
                 label: const Text('User Management'),
                 style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 16,
+                  ),
                   minimumSize: const Size(double.infinity, 48),
                 ),
               ),
@@ -67,8 +97,62 @@ class SuperAdminDashboard extends StatelessWidget {
               Text(
                 'Activate or deactivate any user account',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const AuditLogsScreen(),
                     ),
+                  );
+                },
+                icon: const Icon(Icons.history),
+                label: const Text('Audit Logs'),
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 16,
+                  ),
+                  minimumSize: const Size(double.infinity, 48),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'View system-wide activity and compliance logs',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const SettingsScreen(),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.settings),
+                label: const Text('System Settings'),
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 16,
+                  ),
+                  minimumSize: const Size(double.infinity, 48),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Configure global system settings',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
               const SizedBox(height: 32),
               FilledButton.icon(
@@ -76,7 +160,10 @@ class SuperAdminDashboard extends StatelessWidget {
                 icon: const Icon(Icons.logout),
                 label: const Text('Logout'),
                 style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 16,
+                  ),
                   minimumSize: const Size(double.infinity, 48),
                 ),
               ),

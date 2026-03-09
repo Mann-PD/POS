@@ -19,7 +19,7 @@ export enum UserStatus {
 }
 
 export enum ProductStatus {
-  ACTIVE = 'Active',
+  ACTIVE = 'active',
   DISABLED = 'disabled'
 }
 

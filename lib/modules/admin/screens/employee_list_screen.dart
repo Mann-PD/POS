@@ -146,17 +146,20 @@ class _EmployeeListScreenState extends State<EmployeeListScreen> {
           ),
 
           // Filter chips
-          Obx(() => SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Row(
-                  children: [
-                    _buildFilterChip('all', 'All'),
-                    _buildFilterChip('Active', 'Active'),
-                    _buildFilterChip('Inactive', 'Inactive'),
-                  ],
-                ),
-              )),
+          SizedBox(
+            height: 48,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                children: [
+                  _buildFilterChip('all', 'All'),
+                  _buildFilterChip('Active', 'Active'),
+                  _buildFilterChip('Inactive', 'Inactive'),
+                ],
+              ),
+            ),
+          ),
 
           const SizedBox(height: 8),
 

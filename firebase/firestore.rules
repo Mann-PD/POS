@@ -258,10 +258,9 @@ service cloud.firestore {
       // Read rules
       allow read: if requireAuth() && isUserActive() && (
         isSuperAdmin() || // Super Admin: read all
-        (isAdmin() && isSameShop(resource.data.shopId)) || // Admin: read own shop customers
-        (isViewer() && isSameShop(resource.data.shopId)) // Viewer: read only
+        (isAdmin() && isSameShop(resource.data.shopId)) // Admin: read own shop customers
       );
-      // Employee: no read access (implicitly denied)
+      // Employee and Viewer: no read access (implicitly denied)
       
       // Create rules
       allow create: if requireAuth() && isUserActive() && (
@@ -442,7 +441,7 @@ service cloud.firestore {
       // Read rules
       allow read: if requireAuth() && isUserActive() && (
         isSuperAdmin() || // Super Admin: read all
-        (isAdmin() && resource.data.scope == 'shop' && exists(resource.data.shopId) && isSameShop(resource.data.shopId)) // Admin: read own shop settings
+        (isAdmin() && resource.data.scope == 'shop' && resource.data.shopId != null && isSameShop(resource.data.shopId)) // Admin: read own shop settings
       );
       // All others: no access (implicitly denied)
       
@@ -460,7 +459,7 @@ service cloud.firestore {
       // Update rules
       allow update: if requireAuth() && isUserActive() && (
         isSuperAdmin() || // Super Admin: update all
-        (isAdmin() && resource.data.scope == 'shop' && exists(resource.data.shopId) && isSameShop(resource.data.shopId) && 
+        (isAdmin() && resource.data.scope == 'shop' && resource.data.shopId != null && isSameShop(resource.data.shopId) && 
          request.resource.data.scope == 'shop' && validateShopId(request.resource.data.shopId)) // Admin: update own shop settings
       ) &&
       request.resource.data.settingId == resource.data.settingId &&

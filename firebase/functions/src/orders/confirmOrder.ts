@@ -3,32 +3,43 @@
  *
  * Callable HTTPS. Only role = Employee can call.
  *
- * Validates: authenticated, role == Employee, shopId match,
- * orderStatus == pending, paymentStatus == Success.
+ * Accepts full cart + payment data from client.
+ * Creates order, order_items, deducts inventory, writes
+ * inventory_logs and audit_logs — ALL inside ONE Firestore
+ * transaction. Returns orderId to client.
  *
- * Transaction: lock order (orderStatus = locked), deduct inventory
- * (stock never negative), create inventory_logs, create audit_logs.
- * Orders are immutable after locking.
+ * Client MUST NOT pre-write any order documents.
+ * Ghost orders are impossible because everything is atomic.
  */
 
 import * as functions from 'firebase-functions';
 import * as admin from 'firebase-admin';
 import {
-  Order,
-  OrderItem,
+  User,
+  OrderStatus,
+  PaymentStatus,
+  ProductStatus,
   Product,
   Customer,
-  User,
 } from '../types';
-import { OrderStatus, PaymentStatus } from '../types/canonicalEnums';
 import { validateEmployee } from '../utils/roleValidation';
 import { validateRequiredString } from '../utils/validation';
 
 const db = admin.firestore();
 
-interface ConfirmOrderRequest {
-  orderId: string;
+interface CartItem {
+  productId: string;
+  quantityOrWeight: number;
+  priceSnapshot: number;
+  totalPrice: number;
+}
+
+interface ConfirmOrderPayload {
+  customerId: string;
   shopId: string;
+  paymentMethod: string;
+  totalAmount: number;
+  items: CartItem[];
 }
 
 export const confirmOrder = functions.https.onCall(async (data, context) => {
@@ -40,12 +51,46 @@ export const confirmOrder = functions.https.onCall(async (data, context) => {
   }
 
   const userId = context.auth.uid;
-  const request = data as ConfirmOrderRequest;
+  const payload = data as ConfirmOrderPayload;
 
-  const orderId = validateRequiredString(request?.orderId, 'orderId');
-  const shopId = validateRequiredString(request?.shopId, 'shopId');
+  // Basic top-level validation (no transaction yet)
+  const shopId = validateRequiredString(payload?.shopId, 'shopId');
+  const customerId = validateRequiredString(payload?.customerId, 'customerId');
+  const paymentMethod = validateRequiredString(payload?.paymentMethod, 'paymentMethod');
 
-  // Only role = Employee can call; shopId must match user's shop
+  if (
+    typeof payload?.totalAmount !== 'number' ||
+    payload.totalAmount <= 0
+  ) {
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      'totalAmount must be a positive number'
+    );
+  }
+
+  if (!Array.isArray(payload?.items) || payload.items.length === 0) {
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      'items must be a non-empty array'
+    );
+  }
+
+  for (const item of payload.items) {
+    if (!item.productId || typeof item.productId !== 'string') {
+      throw new functions.https.HttpsError('invalid-argument', 'Each item must have a productId string');
+    }
+    if (typeof item.quantityOrWeight !== 'number' || item.quantityOrWeight <= 0) {
+      throw new functions.https.HttpsError('invalid-argument', 'Each item quantityOrWeight must be > 0');
+    }
+    if (typeof item.priceSnapshot !== 'number' || item.priceSnapshot <= 0) {
+      throw new functions.https.HttpsError('invalid-argument', 'Each item priceSnapshot must be > 0');
+    }
+    if (typeof item.totalPrice !== 'number' || item.totalPrice <= 0) {
+      throw new functions.https.HttpsError('invalid-argument', 'Each item totalPrice must be > 0');
+    }
+  }
+
+  // Only Employee role may confirm orders; shopId must match
   let user: User;
   try {
     user = await validateEmployee(userId, shopId);
@@ -58,50 +103,11 @@ export const confirmOrder = functions.https.onCall(async (data, context) => {
 
   try {
     const result = await db.runTransaction(async (transaction) => {
-      const orderRef = db.collection('orders').doc(orderId);
-      const orderSnap = await transaction.get(orderRef);
+      const now = admin.firestore.Timestamp.now();
 
-      if (!orderSnap.exists) {
-        throw new functions.https.HttpsError('not-found', 'Order not found');
-      }
-
-      const order = orderSnap.data() as Order;
-
-      if (order.shopId !== shopId) {
-        throw new functions.https.HttpsError(
-          'permission-denied',
-          'Order does not belong to this shop'
-        );
-      }
-
-      if (order.employeeId !== userId) {
-        throw new functions.https.HttpsError(
-          'permission-denied',
-          'Only the assigned employee can confirm this order'
-        );
-      }
-
-      if (order.orderStatus !== OrderStatus.pending) {
-        throw new functions.https.HttpsError(
-          'failed-precondition',
-          order.orderStatus === OrderStatus.locked
-            ? 'Order is already locked; direct edits to locked orders are rejected.'
-            : order.orderStatus === OrderStatus.cancelled
-              ? 'Cannot confirm a cancelled order.'
-              : `Order must be pending. Current orderStatus: ${order.orderStatus}`
-        );
-      }
-
-      if (order.paymentStatus !== PaymentStatus.Success) {
-        throw new functions.https.HttpsError(
-          'failed-precondition',
-          `Order payment must be Success. Current paymentStatus: ${order.paymentStatus}`
-        );
-      }
-
-      const customerSnap = await transaction.get(
-        db.collection('customers').doc(order.customerId)
-      );
+      // ── 1. Validate customer ───────────────────────────────────────────────
+      const customerRef = db.collection('customers').doc(customerId);
+      const customerSnap = await transaction.get(customerRef);
       if (!customerSnap.exists) {
         throw new functions.https.HttpsError('not-found', 'Customer not found');
       }
@@ -113,55 +119,50 @@ export const confirmOrder = functions.https.onCall(async (data, context) => {
         );
       }
 
-      const orderItemsSnap = await transaction.get(
-        db.collection('order_items').where('orderId', '==', orderId)
-      );
-      if (orderItemsSnap.empty) {
-        throw new functions.https.HttpsError(
-          'failed-precondition',
-          'Order has no items'
-        );
-      }
-
-      const now = admin.firestore.Timestamp.now();
+      // ── 2. Validate all products and compute inventory deductions ──────────
       const inventoryUpdates: Array<{
         productRef: admin.firestore.DocumentReference;
         newStock: number;
         quantity: number;
-        orderItem: OrderItem;
+        productId: string;
       }> = [];
 
-      for (const itemDoc of orderItemsSnap.docs) {
-        const orderItem = itemDoc.data() as OrderItem;
-        const productRef = db.collection('products').doc(orderItem.productId);
+      for (const item of payload.items) {
+        const productRef = db.collection('products').doc(item.productId);
         const productSnap = await transaction.get(productRef);
 
         if (!productSnap.exists) {
           throw new functions.https.HttpsError(
             'not-found',
-            `Product ${orderItem.productId} not found`
+            `Product ${item.productId} not found`
           );
         }
 
         const product = productSnap.data() as Product;
+
         if (product.shopId !== shopId) {
           throw new functions.https.HttpsError(
             'permission-denied',
-            `Product ${orderItem.productId} does not belong to this shop`
+            `Product ${item.productId} does not belong to this shop`
           );
         }
-        if (product.status !== 'Active') {
+
+        // Accept both enum value ('active') and Firestore stored value ('Active')
+        if (
+          product.status !== ProductStatus.ACTIVE &&
+          (product.status as string) !== 'Active'
+        ) {
           throw new functions.https.HttpsError(
             'failed-precondition',
             `Product ${product.name} is not active`
           );
         }
 
-        const qty = orderItem.quantityOrWeight;
+        const qty = item.quantityOrWeight;
         if (product.stock < qty) {
           throw new functions.https.HttpsError(
             'failed-precondition',
-            `Insufficient stock. Product ${product.productId}: available ${product.stock}, required ${qty}. Stock cannot become negative.`
+            `Insufficient stock for product ${product.name}: available ${product.stock}, required ${qty}`
           );
         }
 
@@ -169,7 +170,7 @@ export const confirmOrder = functions.https.onCall(async (data, context) => {
         if (newStock < 0) {
           throw new functions.https.HttpsError(
             'failed-precondition',
-            'Stock cannot become negative'
+            `Stock cannot become negative for product ${product.name}`
           );
         }
 
@@ -177,34 +178,59 @@ export const confirmOrder = functions.https.onCall(async (data, context) => {
           productRef,
           newStock,
           quantity: qty,
-          orderItem,
+          productId: item.productId,
         });
       }
 
-      // Apply inventory deductions
+      // ── 3. Create order document ───────────────────────────────────────────
+      const orderRef = db.collection('orders').doc();
+      const orderId = orderRef.id;
+
+      transaction.set(orderRef, {
+        orderId,
+        shopId,
+        customerId,
+        employeeId: userId,
+        totalAmount: payload.totalAmount,
+        paymentMethod,
+        paymentStatus: PaymentStatus.SUCCESS,   // 'Success'
+        orderStatus: OrderStatus.LOCKED,        // 'locked' — immediately locked
+        createdAt: now,
+      });
+
+      // ── 4. Create order_items documents ───────────────────────────────────
+      const orderItemsRef = db.collection('order_items');
+      for (const item of payload.items) {
+        const itemRef = orderItemsRef.doc();
+        transaction.set(itemRef, {
+          orderItemId: itemRef.id,
+          orderId,
+          productId: item.productId,
+          quantityOrWeight: item.quantityOrWeight,
+          priceSnapshot: item.priceSnapshot,
+          totalPrice: item.totalPrice,
+        });
+      }
+
+      // ── 5. Deduct inventory ────────────────────────────────────────────────
       for (const u of inventoryUpdates) {
         transaction.update(u.productRef, { stock: u.newStock });
       }
 
-      // Lock order (immutable after this)
-      transaction.update(orderRef, {
-        orderStatus: OrderStatus.locked,
-      });
-
-      // Create inventory_logs entries inside transaction
+      // ── 6. Write inventory_logs ────────────────────────────────────────────
       for (const u of inventoryUpdates) {
         const logRef = db.collection('inventory_logs').doc();
         transaction.set(logRef, {
           logId: logRef.id,
-          productId: u.orderItem.productId,
+          productId: u.productId,
           shopId,
           change: -u.quantity,
-          reason: `Order ${orderId} confirmation - stock deduction`,
+          reason: `Order ${orderId} confirmation — stock deduction`,
           createdAt: now,
         });
       }
 
-      // Create audit_logs entry: userId, role, shopId, action = ORDER_CONFIRMED
+      // ── 7. Write audit_log ────────────────────────────────────────────────
       const auditRef = db.collection('audit_logs').doc();
       transaction.set(auditRef, {
         logId: auditRef.id,
@@ -215,18 +241,18 @@ export const confirmOrder = functions.https.onCall(async (data, context) => {
         entityType: 'order',
         entityId: orderId,
         timestamp: now,
-        totalAmount: order.totalAmount,
-        paymentMethod: order.paymentMethod,
-        itemCount: orderItemsSnap.size,
+        totalAmount: payload.totalAmount,
+        paymentMethod,
+        itemCount: payload.items.length,
       });
 
       return {
         success: true,
         orderId,
-        orderStatus: OrderStatus.locked,
-        totalAmount: order.totalAmount,
-        paymentMethod: order.paymentMethod,
-        itemCount: orderItemsSnap.size,
+        orderStatus: OrderStatus.LOCKED,
+        totalAmount: payload.totalAmount,
+        paymentMethod,
+        itemCount: payload.items.length,
       };
     });
 

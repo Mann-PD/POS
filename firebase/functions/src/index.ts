@@ -92,6 +92,9 @@ export {
   onUserStatusChange,
 } from './auth/auth_audit';
 
+// Super Admin: create Admin user (Auth + Firestore)
+export { createAdminUser } from './auth/createAdminUser';
+
 // ============================================================================
 // PRODUCT TRIGGERS
 // ============================================================================

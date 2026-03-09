@@ -132,6 +132,60 @@ class ReportsService {
     return snap.docs.map((d) => ExpenseModel.fromMap(d.data())).toList();
   }
 
+  /// Today's sales summary for admin dashboard (locked orders only).
+  /// [shopId] required for Admin; pass null for SuperAdmin (all shops).
+  Future<Map<String, dynamic>> getTodaySalesSummary({String? shopId}) async {
+    final now = DateTime.now();
+    final start = DateTime(now.year, now.month, now.day);
+    final end = start.add(const Duration(days: 1));
+    final orders = await getLockedOrdersInRange(
+      start: start,
+      end: end,
+      shopId: shopId,
+    );
+    final totalSales = orders.fold<double>(0, (s, o) => s + o.totalAmount);
+    return {
+      'totalSales': totalSales,
+      'orderCount': orders.length,
+    };
+  }
+
+  /// Number of products with low stock (0 < stock <= [threshold]).
+  static const int defaultLowStockThreshold = 10;
+
+  Future<int> getLowStockCount({
+    required String shopId,
+    int threshold = defaultLowStockThreshold,
+  }) async {
+    final snap = await _db
+        .collection('products')
+        .where('shopId', isEqualTo: shopId)
+        .where('status', isEqualTo: 'Active')
+        .get();
+    int count = 0;
+    for (final doc in snap.docs) {
+      final stock = (doc.data()['stock'] as num?)?.toDouble() ?? 0;
+      if (stock > 0 && stock <= threshold) count++;
+    }
+    return count;
+  }
+
+  /// Recent locked orders for dashboard (default 5).
+  Future<List<OrderModel>> getRecentLockedOrders({
+    required String? shopId,
+    int limit = 5,
+  }) async {
+    Query<Map<String, dynamic>> q = _db
+        .collection('orders')
+        .where('orderStatus', isEqualTo: _ordersLocked);
+    if (shopId != null && shopId.isNotEmpty) {
+      q = q.where('shopId', isEqualTo: shopId);
+    }
+    q = q.orderBy('createdAt', descending: true).limit(limit);
+    final snap = await q.get();
+    return snap.docs.map((d) => OrderModel.fromMap(d.data())).toList();
+  }
+
   static bool isPending(String orderStatus) =>
       orderStatus.toLowerCase() == _ordersPending;
   static bool isLocked(String orderStatus) =>

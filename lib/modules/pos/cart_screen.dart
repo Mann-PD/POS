@@ -260,7 +260,7 @@ class _CartItemCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '₹${item.priceSnapshot.toStringAsFixed(2)} per $_getMeasurementUnit()',
+                    '₹${item.priceSnapshot.toStringAsFixed(2)} per ${_getMeasurementUnit()}',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: colorScheme.outline,
                     ),
@@ -284,7 +284,7 @@ class _CartItemCard extends StatelessWidget {
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        '${item.quantityOrWeight.toStringAsFixed(_isWeightBased ? 2 : 0)} $_getMeasurementUnit()',
+                        '${item.quantityOrWeight.toStringAsFixed(_isWeightBased ? 2 : 0)} ${_getMeasurementUnit()}',
                         style: theme.textTheme.bodyMedium?.copyWith(
                           fontWeight: FontWeight.w600,
                         ),

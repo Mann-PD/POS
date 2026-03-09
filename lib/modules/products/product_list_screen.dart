@@ -146,18 +146,21 @@ class _ProductListScreenState extends State<ProductListScreen> {
           ),
 
           // Filter chips
-          Obx(() => SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Row(
-                  children: [
-                    _buildFilterChip('all', 'All'),
-                    _buildFilterChip('Active', 'Active'),
-                    _buildFilterChip('Inactive', 'Inactive'),
-                    _buildFilterChip('low-stock', 'Low Stock'),
-                  ],
-                ),
-              )),
+          SizedBox(
+            height: 48,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                children: [
+                  _buildFilterChip('all', 'All'),
+                  _buildFilterChip('Active', 'Active'),
+                  _buildFilterChip('Inactive', 'Inactive'),
+                  _buildFilterChip('low-stock', 'Low Stock'),
+                ],
+              ),
+            ),
+          ),
 
           const SizedBox(height: 8),
 

@@ -94,7 +94,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
     try {
       final cartController = Get.find<CartController>();
-      
+
       if (cartController.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -110,73 +110,44 @@ class _PaymentScreenState extends State<PaymentScreen> {
         return;
       }
 
-      // Step 1: Create or get customer
+      // Step 1: Create or get customer (Employee create permitted by Firestore rules)
       final customerId = await _createOrGetCustomer();
 
-      // Step 2: Save total amount before clearing cart
+      // Step 2: Snapshot cart data before the async call
       final totalAmount = cartController.totalAmount;
       final cartItems = List.from(cartController.items);
 
-      // Step 3: Create order document
-      final orderId = FirebaseFirestore.instance
-          .collection('orders')
-          .doc()
-          .id;
-
-      final orderRef = FirebaseFirestore.instance
-          .collection('orders')
-          .doc(orderId);
-
-      // Step 4: Create order items
-      final orderItemsRef = FirebaseFirestore.instance
-          .collection('order_items');
-
-      final batch = FirebaseFirestore.instance.batch();
-
-      // Create order document (paymentStatus must be 'Success' for confirmOrder and Firestore rules)
-      batch.set(orderRef, {
-        'orderId': orderId,
-        'shopId': _shopId,
-        'customerId': customerId,
-        'employeeId': _userId,
-        'totalAmount': totalAmount,
-        'paymentMethod': _selectedPaymentMethod,
-        'paymentStatus': 'Success',
-        'orderStatus': 'pending',
-        'createdAt': FieldValue.serverTimestamp(),
-      });
-
-      // Create order items
-      for (final item in cartItems) {
-        final itemId = orderItemsRef.doc().id;
-        batch.set(orderItemsRef.doc(itemId), {
-          'orderItemId': itemId,
-          'orderId': orderId,
-          'productId': item.product.productId,
-          'quantityOrWeight': item.quantityOrWeight,
-          'priceSnapshot': item.priceSnapshot,
-          'totalPrice': item.totalPrice,
-        });
-      }
-
-      await batch.commit();
-
-      // Step 5: Call Cloud Function to confirm order
+      // Step 3: Send full cart to confirmOrder Cloud Function.
+      // The function creates the order, order_items, deducts stock, and
+      // writes inventory_logs + audit_logs — all in ONE Firestore transaction.
+      // The client does NOT pre-write any order document — ghost orders are impossible.
       final functions = FirebaseFunctions.instance;
       final confirmOrderFunction = functions.httpsCallable('confirmOrder');
 
       final result = await confirmOrderFunction.call({
-        'orderId': orderId,
+        'customerId': customerId,
         'shopId': _shopId,
+        'paymentMethod': _selectedPaymentMethod,
+        'totalAmount': totalAmount,
+        'items': cartItems
+            .map((item) => {
+                  'productId': item.product.productId,
+                  'quantityOrWeight': item.quantityOrWeight,
+                  'priceSnapshot': item.priceSnapshot,
+                  'totalPrice': item.totalPrice,
+                })
+            .toList(),
       });
 
       if (result.data['success'] == true) {
-        // Order confirmed successfully
+        // Step 4: Cloud Function returns the newly-created orderId
+        final orderId = result.data['orderId'] as String;
+
         if (mounted) {
-          // Clear cart after successful order
+          // Clear cart after order is locked server-side
           cartController.clear();
-          
-          // Navigate to receipt screen
+
+          // Step 5: Navigate to ReceiptScreen using the returned orderId
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(
               builder: (context) => ReceiptScreen(
@@ -212,7 +183,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
   }
 
   Future<String> _createOrGetCustomer() async {
-    // Check if customer exists by mobile number
+    // Check if customer already exists by mobile number in this shop
     final existingCustomers = await FirebaseFirestore.instance
         .collection('customers')
         .where('shopId', isEqualTo: _shopId)
@@ -224,10 +195,9 @@ class _PaymentScreenState extends State<PaymentScreen> {
       return existingCustomers.docs.first.id;
     }
 
-    // Create new customer
-    final customerRef = FirebaseFirestore.instance
-        .collection('customers')
-        .doc();
+    // Create new customer (Employee create is allowed by Firestore rules)
+    final customerRef =
+        FirebaseFirestore.instance.collection('customers').doc();
 
     await customerRef.set({
       'customerId': customerRef.id,

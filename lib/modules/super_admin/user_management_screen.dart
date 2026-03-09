@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../data/models/user_model.dart';
+import 'create_admin_screen.dart';
 
-/// Super Admin only: list all users and set status (Active / Inactive / Suspended).
-/// Use this to activate accounts that are stuck "inactive".
+/// Super Admin only: list all users, set status, and create Admin users.
 class UserManagementScreen extends StatelessWidget {
   const UserManagementScreen({super.key});
 
@@ -31,6 +31,20 @@ class UserManagementScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text('User Management'),
+        actions: [
+          TextButton.icon(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const CreateAdminScreen(),
+                ),
+              );
+            },
+            icon: const Icon(Icons.person_add),
+            label: const Text('Create Admin'),
+          ),
+        ],
       ),
       body: StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance

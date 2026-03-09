@@ -268,19 +268,22 @@ class _InventoryScreenState extends State<InventoryScreen> {
           ),
 
           // Filter chips
-          Obx(() => SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Row(
-                  children: [
-                    _buildFilterChip('all', 'All'),
-                    _buildFilterChip('Active', 'Active'),
-                    _buildFilterChip('Inactive', 'Inactive'),
-                    _buildFilterChip('low-stock', 'Low Stock'),
-                    _buildFilterChip('out-of-stock', 'Out of Stock'),
-                  ],
-                ),
-              )),
+          SizedBox(
+            height: 48,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                children: [
+                  _buildFilterChip('all', 'All'),
+                  _buildFilterChip('Active', 'Active'),
+                  _buildFilterChip('Inactive', 'Inactive'),
+                  _buildFilterChip('low-stock', 'Low Stock'),
+                  _buildFilterChip('out-of-stock', 'Out of Stock'),
+                ],
+              ),
+            ),
+          ),
 
           const SizedBox(height: 8),
 
@@ -442,7 +445,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
             Row(
               children: [
                 CircleAvatar(
-                  backgroundColor: stockColor.withOpacity(0.1),
+                  backgroundColor: stockColor.withValues(alpha: 0.1),
                   child: Icon(stockIcon, color: stockColor),
                 ),
                 const SizedBox(width: 12),

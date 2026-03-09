@@ -426,9 +426,13 @@ class _PosHomeScreenState extends State<PosHomeScreen> {
                       .toList();
                 }
 
-                // Filter by category (if categories are implemented)
-                // For now, show all products
-
+                // Filter by category
+                if (_selectedCategory != 'all') {
+                  filteredProducts = filteredProducts
+                      .where((product) =>
+                          product.categoryId == _selectedCategory)
+                      .toList();
+                }
                 // Filter out-of-stock products (show but disabled)
                 // Actually, show all products but mark out-of-stock
 
