@@ -4,6 +4,8 @@ import '../admin/audit_logs_screen.dart';
 import '../admin/settings_screen.dart';
 import 'create_shop_screen.dart';
 import 'user_management_screen.dart';
+import 'shop_list_screen.dart';
+import 'global_reports_screen.dart';
 
 class SuperAdminDashboard extends StatelessWidget {
   const SuperAdminDashboard({super.key});
@@ -79,6 +81,33 @@ class SuperAdminDashboard extends StatelessWidget {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
+                      builder: (context) => const ShopListScreen(),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.store_mall_directory),
+                label: const Text('Manage Shops'),
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 16,
+                  ),
+                  minimumSize: const Size(double.infinity, 48),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'View and manage all shops in the system',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
                       builder: (context) => const UserManagementScreen(),
                     ),
                   );
@@ -96,6 +125,33 @@ class SuperAdminDashboard extends StatelessWidget {
               const SizedBox(height: 12),
               Text(
                 'Activate or deactivate any user account',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => GlobalReportsScreen(),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.public),
+                label: const Text('Global Reports'),
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 16,
+                  ),
+                  minimumSize: const Size(double.infinity, 48),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Cross-shop analytics for Super Admin',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),

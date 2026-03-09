@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
+
 import '../../data/models/product_model.dart';
+import '../../core/services/storage_service.dart';
 import 'pos_home_screen.dart';
 
 /// Order Success & Receipt Screen - Display order confirmation and receipt
@@ -30,6 +34,164 @@ class ReceiptScreen extends StatelessWidget {
         return 'Card';
       default:
         return paymentMethod;
+    }
+  }
+
+  Future<void> _downloadAndUploadReceipt(BuildContext context) async {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    try {
+      // Load order items with product names
+      final itemsSnapshot = await FirebaseFirestore.instance
+          .collection('order_items')
+          .where('orderId', isEqualTo: orderId)
+          .get();
+
+      final items = <Map<String, dynamic>>[];
+
+      for (final itemDoc in itemsSnapshot.docs) {
+        final itemData = itemDoc.data();
+        final productDoc = await FirebaseFirestore.instance
+            .collection('products')
+            .doc(itemData['productId'] as String)
+            .get();
+
+        if (productDoc.exists && productDoc.data() != null) {
+          final product = ProductModel.fromMap(
+            productDoc.data() as Map<String, dynamic>,
+          );
+          items.add({
+            'product': product,
+            'quantity':
+                (itemData['quantityOrWeight'] as num?)?.toDouble() ?? 0.0,
+            'price':
+                (itemData['priceSnapshot'] as num?)?.toDouble() ?? 0.0,
+            'total':
+                (itemData['totalPrice'] as num?)?.toDouble() ?? 0.0,
+          });
+        }
+      }
+
+      final pdf = pw.Document();
+
+      pdf.addPage(
+        pw.Page(
+          build: (pw.Context context) {
+            return pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Text(
+                  'Receipt',
+                  style: pw.TextStyle(
+                    fontSize: 20,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+                pw.SizedBox(height: 8),
+                pw.Text('Order ID: $orderId'),
+                pw.Text('Customer: $customerName'),
+                pw.Text('Mobile: $customerMobile'),
+                pw.Text('Payment: ${_getPaymentMethodLabel()}'),
+                pw.SizedBox(height: 16),
+                pw.Text(
+                  'Items',
+                  style: pw.TextStyle(
+                    fontSize: 14,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+                pw.SizedBox(height: 8),
+                if (items.isEmpty)
+                  pw.Text('No items found')
+                else
+                  pw.Column(
+                    children: items.map((item) {
+                      final product =
+                          item['product'] as ProductModel;
+                      final quantity =
+                          (item['quantity'] as num).toDouble();
+                      final price =
+                          (item['price'] as num).toDouble();
+                      final total =
+                          (item['total'] as num).toDouble();
+                      return pw.Container(
+                        margin:
+                            const pw.EdgeInsets.only(bottom: 4),
+                        child: pw.Row(
+                          mainAxisAlignment:
+                              pw.MainAxisAlignment.spaceBetween,
+                          children: [
+                            pw.Expanded(
+                              child: pw.Text(product.name),
+                            ),
+                            pw.Text(
+                              '${quantity.toStringAsFixed(2)} ${product.measurementType.toLowerCase()} × ₹${price.toStringAsFixed(2)}',
+                            ),
+                            pw.SizedBox(width: 8),
+                            pw.Text(
+                              '₹${total.toStringAsFixed(2)}',
+                            ),
+                          ],
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                pw.Divider(),
+                pw.Row(
+                  mainAxisAlignment:
+                      pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text(
+                      'Total Amount',
+                      style: pw.TextStyle(
+                        fontWeight: pw.FontWeight.bold,
+                      ),
+                    ),
+                    pw.Text(
+                      '₹${totalAmount.toStringAsFixed(2)}',
+                      style: pw.TextStyle(
+                        fontWeight: pw.FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            );
+          },
+        ),
+      );
+
+      final bytes = await pdf.save();
+
+      // Allow user to download/share the PDF locally
+      await Printing.sharePdf(
+        bytes: bytes,
+        filename: 'receipt_$orderId.pdf',
+      );
+
+      // Upload to Firebase Storage
+      await StorageService.instance.uploadReceipt(
+        orderId: orderId,
+        pdfBytes: bytes,
+      );
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Receipt saved to cloud storage'),
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to export receipt: $e'),
+            backgroundColor: colorScheme.error,
+          ),
+        );
+      }
     }
   }
 
@@ -261,10 +423,11 @@ class ReceiptScreen extends StatelessWidget {
                         Expanded(
                           child: OutlinedButton.icon(
                             onPressed: () {
-                              // TODO: Implement print functionality
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
-                                  content: Text('Print functionality coming soon'),
+                                  content: Text(
+                                    'Direct print will be available in a future update',
+                                  ),
                                 ),
                               );
                             },
@@ -281,16 +444,9 @@ class ReceiptScreen extends StatelessWidget {
                         const SizedBox(width: 12),
                         Expanded(
                           child: OutlinedButton.icon(
-                            onPressed: () {
-                              // TODO: Implement share functionality
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Share functionality coming soon'),
-                                ),
-                              );
-                            },
+                            onPressed: () => _downloadAndUploadReceipt(context),
                             icon: const Icon(Icons.share),
-                            label: const Text('Share'),
+                            label: const Text('Download PDF'),
                             style: OutlinedButton.styleFrom(
                               padding: const EdgeInsets.symmetric(vertical: 12),
                               shape: RoundedRectangleBorder(

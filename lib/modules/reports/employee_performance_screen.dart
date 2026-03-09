@@ -1,0 +1,231 @@
+import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+
+import '../../data/models/user_model.dart';
+import 'reports_service.dart';
+
+/// Employee Performance Report
+/// Shows orders handled, total sales, and average order value per employee.
+class EmployeePerformanceScreen extends StatefulWidget {
+  const EmployeePerformanceScreen({super.key});
+
+  @override
+  State<EmployeePerformanceScreen> createState() =>
+      _EmployeePerformanceScreenState();
+}
+
+class _EmployeePerformanceScreenState
+    extends State<EmployeePerformanceScreen> {
+  final ReportsService _reports = ReportsService();
+
+  String? _shopId;
+  bool _loadingUser = true;
+  bool _loadingData = false;
+  List<EmployeePerformanceRow> _rows = const [];
+  DateTimeRange? _range;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUser();
+  }
+
+  Future<void> _loadUser() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        setState(() {
+          _loadingUser = false;
+          _error = 'User not authenticated';
+        });
+        return;
+      }
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      if (!doc.exists || doc.data() == null) {
+        setState(() {
+          _loadingUser = false;
+          _error = 'User document not found';
+        });
+        return;
+      }
+      final u = UserModel.fromMap(doc.data() as Map<String, dynamic>);
+      final now = DateTime.now();
+      final initialRange = DateTimeRange(
+        start: DateTime(now.year, now.month, now.day)
+            .subtract(const Duration(days: 30)),
+        end: DateTime(now.year, now.month, now.day),
+      );
+      setState(() {
+        _shopId = u.shopId;
+        _loadingUser = false;
+        _range = initialRange;
+      });
+      await _loadData();
+    } catch (e) {
+      setState(() {
+        _loadingUser = false;
+        _error = 'Failed to load user: $e';
+      });
+    }
+  }
+
+  Future<void> _pickRange() async {
+    final now = DateTime.now();
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(now.year - 3),
+      lastDate: now,
+      initialDateRange: _range,
+    );
+    if (picked != null) {
+      setState(() {
+        _range = picked;
+      });
+      await _loadData();
+    }
+  }
+
+  Future<void> _loadData() async {
+    if (_shopId == null || _shopId!.isEmpty || _range == null) return;
+    setState(() {
+      _loadingData = true;
+      _error = null;
+    });
+
+    try {
+      final start = DateTime(
+        _range!.start.year,
+        _range!.start.month,
+        _range!.start.day,
+      );
+      final end = DateTime(
+        _range!.end.year,
+        _range!.end.month,
+        _range!.end.day,
+        23,
+        59,
+        59,
+      );
+
+      final rows = await _reports.getEmployeePerformance(
+        start: start,
+        end: end,
+        shopId: _shopId,
+      );
+      setState(() {
+        _rows = rows;
+        _loadingData = false;
+      });
+    } catch (e) {
+      setState(() {
+        _loadingData = false;
+        _error = 'Failed to load employee performance: $e';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    if (_loadingUser) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Employee Performance')),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (_error != null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Employee Performance')),
+        body: Center(child: Text(_error!)),
+      );
+    }
+
+    if (_shopId == null || _shopId!.isEmpty) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Employee Performance')),
+        body: const Center(child: Text('Shop not assigned')),
+      );
+    }
+
+    final rangeText = _range == null
+        ? 'No range selected'
+        : '${_range!.start.day}/${_range!.start.month}/${_range!.start.year}'
+          ' - '
+          '${_range!.end.day}/${_range!.end.month}/${_range!.end.year}';
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Employee Performance'),
+      ),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: OutlinedButton.icon(
+                onPressed: _pickRange,
+                icon: const Icon(Icons.date_range),
+                label: Text(rangeText),
+              ),
+            ),
+            Expanded(
+              child: _loadingData
+                  ? const Center(child: CircularProgressIndicator())
+                  : _rows.isEmpty
+                      ? const Center(
+                          child: Text('No employee sales in selected range'),
+                        )
+                      : ListView.builder(
+                          padding: const EdgeInsets.all(16),
+                          itemCount: _rows.length,
+                          itemBuilder: (context, index) {
+                            final row = _rows[index];
+                            return Card(
+                              margin:
+                                  const EdgeInsets.only(bottom: 8),
+                              child: ListTile(
+                                leading: CircleAvatar(
+                                  backgroundColor:
+                                      colorScheme.primaryContainer,
+                                  child: Text(
+                                    row.employeeName
+                                        .substring(0, 1)
+                                        .toUpperCase(),
+                                    style: TextStyle(
+                                      color: colorScheme
+                                          .onPrimaryContainer,
+                                    ),
+                                  ),
+                                ),
+                                title: Text(row.employeeName),
+                                subtitle: Text(
+                                  '${row.orderCount} orders • '
+                                  'AOV ₹${row.averageOrderValue.toStringAsFixed(2)}',
+                                ),
+                                trailing: Text(
+                                  '₹${row.totalSales.toStringAsFixed(2)}',
+                                  style: theme.textTheme.bodyLarge
+                                      ?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+

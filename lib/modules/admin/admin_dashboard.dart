@@ -11,6 +11,10 @@ import 'employees/employee_list_screen.dart';
 import '../expenses/expense_screen.dart';
 import '../reports/reports_dashboard.dart';
 import '../reports/reports_service.dart';
+import '../reports/sales_report_screen.dart';
+import '../reports/product_sales_report_screen.dart';
+import '../reports/employee_performance_screen.dart';
+import '../reports/expense_report_screen.dart';
 import '../orders/order_history_screen.dart';
 import 'customers/customer_list_screen.dart';
 import 'audit_logs_screen.dart';
@@ -473,6 +477,76 @@ class _AdminDashboardState extends State<AdminDashboard> {
               const SizedBox(height: 16),
 
               _buildReportsCard(context),
+              const SizedBox(height: 16),
+              // Dedicated reports tiles
+              GridView.count(
+                crossAxisCount: 2,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                crossAxisSpacing: 16,
+                mainAxisSpacing: 16,
+                childAspectRatio: 1.2,
+                children: [
+                  _buildNavigationCard(
+                    context,
+                    title: 'Sales Reports',
+                    icon: Icons.bar_chart,
+                    color: colorScheme.primary,
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const SalesReportScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                  _buildNavigationCard(
+                    context,
+                    title: 'Product Reports',
+                    icon: Icons.insights,
+                    color: colorScheme.secondary,
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) =>
+                              const ProductSalesReportScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                  _buildNavigationCard(
+                    context,
+                    title: 'Employee Reports',
+                    icon: Icons.people_alt,
+                    color: colorScheme.tertiary,
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) =>
+                              const EmployeePerformanceScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                  _buildNavigationCard(
+                    context,
+                    title: 'Expense Reports',
+                    icon: Icons.account_balance_wallet,
+                    color: colorScheme.error,
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const ExpenseReportScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
               const SizedBox(height: 16),
               _buildOrderHistoryCard(context),
               const SizedBox(height: 16),
