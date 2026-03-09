@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../data/models/setting_model.dart';
 import '../../data/models/user_model.dart';
+import '../../core/rbac/role_constants.dart';
 
 /// Settings screen: Shop-level (Admin) or System-level (Super Admin).
 /// Read/write per Firestore rules; future-only application per requirements.
@@ -37,10 +38,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
           .get();
       if (doc.exists) {
         final u = UserModel.fromMap(doc.data() as Map<String, dynamic>);
-        final role = u.role.toLowerCase().replaceAll(RegExp(r'[_\s-]'), '');
         setState(() {
           _shopId = u.shopId;
-          _isSuperAdmin = role == 'superadmin';
+          _isSuperAdmin = u.role == RoleConstants.superAdmin;
           _loading = false;
         });
       } else {

@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:get/get.dart';
 import '../../../data/models/user_model.dart';
+import '../../../core/rbac/role_constants.dart';
 import 'employee_controller.dart';
 
 /// Employee Form Screen - Create New Employee
@@ -106,7 +107,7 @@ class _EmployeeFormScreenState extends State<EmployeeFormScreen> {
         'name': _nameController.text.trim(),
         'email': _emailController.text.trim(),
         'phone': _phoneController.text.trim(),
-        'role': 'Employee',
+        'role': RoleConstants.employee,
         'shopId': _shopId!,
         'status': 'Active',
         'createdAt': FieldValue.serverTimestamp(),

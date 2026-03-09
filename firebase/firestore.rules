@@ -256,11 +256,14 @@ service cloud.firestore {
     
     match /customers/{customerId} {
       // Read rules
+      // Employees may read customers for their own shop (for POS workflow),
+      // but cannot write.
       allow read: if requireAuth() && isUserActive() && (
         isSuperAdmin() || // Super Admin: read all
-        (isAdmin() && isSameShop(resource.data.shopId)) // Admin: read own shop customers
+        (isAdmin() && isSameShop(resource.data.shopId)) || // Admin: read own shop customers
+        (isEmployee() && isSameShop(resource.data.shopId)) // Employee: read own shop customers
       );
-      // Employee and Viewer: no read access (implicitly denied)
+      // Viewer: no read access (implicitly denied)
       
       // Create rules
       allow create: if requireAuth() && isUserActive() && (

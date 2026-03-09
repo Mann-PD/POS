@@ -5,9 +5,10 @@ import 'package:get/get.dart';
 import '../authentication/auth_controller.dart';
 import 'admin_controller.dart';
 import '../products/product_list_screen.dart';
-import '../inventory/inventory_screen.dart';
+import 'inventory/inventory_screen.dart';
 import '../inventory/inventory_adjustment_screen.dart';
 import 'employees/employee_list_screen.dart';
+import 'categories/category_list_screen.dart';
 import '../expenses/expense_screen.dart';
 import '../reports/reports_dashboard.dart';
 import '../reports/reports_service.dart';
@@ -442,7 +443,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (context) => const ProductListScreen(),
+                          builder: (context) =>
+                              const CategoryListScreen(),
                         ),
                       );
                     },

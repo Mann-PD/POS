@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:get/get.dart';
 import '../../../data/models/user_model.dart';
+import '../../../core/rbac/role_constants.dart';
 import 'employee_controller.dart';
 import 'employee_form_screen.dart';
 
@@ -168,7 +169,7 @@ class _EmployeeListScreenState extends State<EmployeeListScreen> {
               stream: FirebaseFirestore.instance
                   .collection('users')
                   .where('shopId', isEqualTo: _shopId)
-                  .where('role', isEqualTo: 'Employee')
+                  .where('role', isEqualTo: RoleConstants.employee)
                   .orderBy('name')
                   .snapshots(),
               builder: (context, snapshot) {

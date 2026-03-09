@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import '../../data/models/user_model.dart';
+import '../../core/rbac/role_constants.dart';
 
 /// Settings Screen
 ///
@@ -63,7 +64,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final db = FirebaseFirestore.instance;
     final user = _currentUser!;
 
-    if (user.role == 'SuperAdmin') {
+    if (user.role == RoleConstants.superAdmin) {
       // Super Admin sees all settings
       return db.collection('settings').snapshots();
     } else {
