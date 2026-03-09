@@ -6,11 +6,13 @@ import '../authentication/auth_controller.dart';
 import 'admin_controller.dart';
 import '../products/product_list_screen.dart';
 import '../inventory/inventory_screen.dart';
-import 'screens/employee_list_screen.dart';
+import '../inventory/inventory_adjustment_screen.dart';
+import 'employees/employee_list_screen.dart';
 import '../expenses/expense_screen.dart';
 import '../reports/reports_dashboard.dart';
 import '../reports/reports_service.dart';
 import '../orders/order_history_screen.dart';
+import 'customers/customer_list_screen.dart';
 import 'audit_logs_screen.dart';
 import 'settings_screen.dart';
 import '../../data/models/order_model.dart';
@@ -409,6 +411,49 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         context,
                         MaterialPageRoute(
                           builder: (context) => const ExpenseScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                  _buildNavigationCard(
+                    context,
+                    title: 'Customers',
+                    icon: Icons.person_outline,
+                    color: colorScheme.primaryContainer,
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const CustomerListScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                  _buildNavigationCard(
+                    context,
+                    title: 'Categories',
+                    icon: Icons.category,
+                    color: colorScheme.secondaryContainer,
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const ProductListScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                  _buildNavigationCard(
+                    context,
+                    title: 'Inventory Adjustment',
+                    icon: Icons.tune,
+                    color: colorScheme.tertiaryContainer,
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) =>
+                              const InventoryAdjustmentScreen(),
                         ),
                       );
                     },

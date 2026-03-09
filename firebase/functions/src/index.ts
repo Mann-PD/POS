@@ -49,6 +49,9 @@ export {
   getInventoryLogsForShop,
 } from './inventory/inventoryLogs';
 
+// Inventory adjustment callable (Admin/SuperAdmin only)
+export { adjustStock } from './inventory/adjustStock';
+
 // ============================================================================
 // EXPENSE AUDIT FUNCTIONS
 // ============================================================================

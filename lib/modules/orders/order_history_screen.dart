@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import '../../data/models/order_model.dart';
 import '../reports/reports_service.dart';
+import 'order_detail_screen.dart';
 
 /// Admin Order History: list shop orders, view details, cancel pending (via CF).
 /// Locked orders read-only; no delete.
@@ -126,19 +127,16 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
   }
 
   void _showOrderDetail(BuildContext context, OrderModel order) {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (context) => _OrderDetailSheet(
-        order: order,
-        readOnly: widget.readOnly,
-        onCancel: order.isPending && !widget.readOnly
-            ? () {
-                Navigator.pop(context);
-                _cancelOrder(context, order);
-              }
-            : null,
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => OrderDetailScreen(
+          order: order,
+          readOnly: widget.readOnly,
+          onCancel: order.isPending && !widget.readOnly
+              ? () => _cancelOrder(context, order)
+              : null,
+        ),
       ),
     );
   }
@@ -288,139 +286,5 @@ class _OrderCard extends StatelessWidget {
         ),
       ),
     );
-  }
-}
-
-class _OrderDetailSheet extends StatelessWidget {
-  const _OrderDetailSheet({
-    required this.order,
-    required this.readOnly,
-    this.onCancel,
-  });
-
-  final OrderModel order;
-  final bool readOnly;
-  final VoidCallback? onCancel;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-
-    return DraggableScrollableSheet(
-      initialChildSize: 0.6,
-      minChildSize: 0.3,
-      maxChildSize: 0.95,
-      expand: false,
-      builder: (context, scrollController) {
-        return SingleChildScrollView(
-          controller: scrollController,
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'Order ${order.orderId.length > 8 ? order.orderId.substring(0, 8).toUpperCase() : order.orderId.toUpperCase()}',
-                style: theme.textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.bold,
-                  fontFamily: 'monospace',
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                '${order.createdAt.day}/${order.createdAt.month}/${order.createdAt.year} ${order.createdAt.hour.toString().padLeft(2, '0')}:${order.createdAt.minute.toString().padLeft(2, '0')}',
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: colorScheme.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text('Status: ${order.orderStatus.toUpperCase()}'),
-              Text('Payment: ${order.paymentMethod} • ${order.paymentStatus}'),
-              Text('Total: ₹${order.totalAmount.toStringAsFixed(2)}'),
-              if (order.customerName.isNotEmpty) Text('Customer: ${order.customerName}'),
-              if (order.employeeName.isNotEmpty) Text('Employee: ${order.employeeName}'),
-              const SizedBox(height: 16),
-              const Text('Items', style: TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 8),
-              FutureBuilder<List<Map<String, dynamic>>>(
-                future: _loadItems(order.orderId),
-                builder: (context, snap) {
-                  if (snap.connectionState == ConnectionState.waiting) {
-                    return const Padding(
-                      padding: EdgeInsets.all(16),
-                      child: Center(child: CircularProgressIndicator()),
-                    );
-                  }
-                  final items = snap.data ?? [];
-                  if (items.isEmpty) {
-                    return const Text('No items');
-                  }
-                  return Column(
-                    children: items.map((item) {
-                      final qty = (item['quantityOrWeight'] as num?)?.toDouble() ?? 0;
-                      final total = (item['totalPrice'] as num?)?.toDouble() ?? 0;
-                      final name = item['productName'] as String? ?? 'Product';
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Expanded(
-                              child: Text('$name × ${qty.toStringAsFixed(2)}'),
-                            ),
-                            Text('₹${total.toStringAsFixed(2)}'),
-                          ],
-                        ),
-                      );
-                    }).toList(),
-                  );
-                },
-              ),
-              if (onCancel != null) ...[
-                const SizedBox(height: 24),
-                FilledButton.icon(
-                  onPressed: () => onCancel!(),
-                  icon: const Icon(Icons.cancel_outlined),
-                  label: const Text('Cancel this order'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: Colors.red,
-                    foregroundColor: Colors.white,
-                  ),
-                ),
-              ],
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Future<List<Map<String, dynamic>>> _loadItems(String orderId) async {
-    final itemsSnap = await FirebaseFirestore.instance
-        .collection('order_items')
-        .where('orderId', isEqualTo: orderId)
-        .get();
-
-    final list = <Map<String, dynamic>>[];
-    for (final doc in itemsSnap.docs) {
-      final data = doc.data();
-      final productId = data['productId'] as String?;
-      String name = 'Product';
-      if (productId != null && productId.isNotEmpty) {
-        final productDoc = await FirebaseFirestore.instance
-            .collection('products')
-            .doc(productId)
-            .get();
-        if (productDoc.exists && productDoc.data() != null) {
-          name = productDoc.data()!['name'] as String? ?? productId;
-        }
-      }
-      list.add({
-        ...data,
-        'productName': name,
-      });
-    }
-    return list;
   }
 }
