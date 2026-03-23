@@ -143,7 +143,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
             colors: [
               colorScheme.primaryContainer,
               colorScheme.surface,
-              colorScheme.secondaryContainer.withOpacity(0.3),
+              colorScheme.secondaryContainer.withValues(alpha: 0.3),
             ],
           ),
         ),
@@ -284,7 +284,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
         prefixIcon: Icon(Icons.email_outlined, color: colorScheme.primary),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
         filled: true,
-        fillColor: colorScheme.surfaceContainerHighest.withOpacity(0.3),
+        fillColor: colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
       ),
       validator: (value) {
         if (value == null || value.trim().isEmpty) {
@@ -362,7 +362,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
           Text(
             'Didn\'t receive the email? Check your spam folder or try again.',
             style: TextStyle(
-              color: colorScheme.onTertiaryContainer.withOpacity(0.8),
+              color: colorScheme.onTertiaryContainer.withValues(alpha: 0.8),
               fontSize: 12,
             ),
             textAlign: TextAlign.center,

@@ -54,9 +54,9 @@ class _EmployeeListScreenState extends State<EmployeeListScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading user data: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error loading user data: $e')));
       }
       setState(() {
         _isLoading = false;
@@ -72,8 +72,8 @@ class _EmployeeListScreenState extends State<EmployeeListScreen> {
           .collection('users')
           .doc(employee.userId)
           .update({
-        'status': employee.status == 'Active' ? 'Inactive' : 'Active',
-      });
+            'status': employee.status == 'Active' ? 'Inactive' : 'Active',
+          });
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -86,9 +86,9 @@ class _EmployeeListScreenState extends State<EmployeeListScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error updating employee: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error updating employee: $e')));
       }
     } finally {
       _controller.setLoading(false);
@@ -149,17 +149,19 @@ class _EmployeeListScreenState extends State<EmployeeListScreen> {
           ),
 
           // Filter chips
-          Obx(() => SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Row(
-                  children: [
-                    _buildFilterChip('all', 'All'),
-                    _buildFilterChip('Active', 'Active'),
-                    _buildFilterChip('Inactive', 'Inactive'),
-                  ],
-                ),
-              )),
+          Obx(
+            () => SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                children: [
+                  _buildFilterChip('all', 'All'),
+                  _buildFilterChip('Active', 'Active'),
+                  _buildFilterChip('Inactive', 'Inactive'),
+                ],
+              ),
+            ),
+          ),
 
           const SizedBox(height: 8),
 
@@ -212,7 +214,8 @@ class _EmployeeListScreenState extends State<EmployeeListScreen> {
                         const SizedBox(height: 8),
                         Text(
                           'Tap + to add your first employee',
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          style: Theme.of(context).textTheme.bodyMedium
+                              ?.copyWith(
                                 color: Theme.of(context).colorScheme.outline,
                               ),
                         ),
@@ -222,9 +225,10 @@ class _EmployeeListScreenState extends State<EmployeeListScreen> {
                 }
 
                 final allEmployees = snapshot.data!.docs
-                    .map((doc) => UserModel.fromMap(
-                          doc.data() as Map<String, dynamic>,
-                        ))
+                    .map(
+                      (doc) =>
+                          UserModel.fromMap(doc.data() as Map<String, dynamic>),
+                    )
                     .toList();
 
                 return Obx(() {
@@ -233,15 +237,18 @@ class _EmployeeListScreenState extends State<EmployeeListScreen> {
                   // Filter by search query
                   if (_controller.searchQuery.value.isNotEmpty) {
                     filteredEmployees = filteredEmployees
-                        .where((employee) =>
-                            employee.name
-                                .toLowerCase()
-                                .contains(_controller.searchQuery.value.toLowerCase()) ||
-                            employee.email
-                                .toLowerCase()
-                                .contains(_controller.searchQuery.value.toLowerCase()) ||
-                            employee.phone
-                                .contains(_controller.searchQuery.value))
+                        .where(
+                          (employee) =>
+                              employee.name.toLowerCase().contains(
+                                _controller.searchQuery.value.toLowerCase(),
+                              ) ||
+                              employee.email.toLowerCase().contains(
+                                _controller.searchQuery.value.toLowerCase(),
+                              ) ||
+                              employee.phone.contains(
+                                _controller.searchQuery.value,
+                              ),
+                        )
                         .toList();
                   }
 
@@ -283,18 +290,20 @@ class _EmployeeListScreenState extends State<EmployeeListScreen> {
   }
 
   Widget _buildFilterChip(String value, String label) {
-    return Obx(() => Padding(
-          padding: const EdgeInsets.only(right: 8),
-          child: FilterChip(
-            label: Text(label),
-            selected: _controller.selectedFilter.value == value,
-            onSelected: (selected) {
-              if (selected) {
-                _controller.setSelectedFilter(value);
-              }
-            },
-          ),
-        ));
+    return Obx(
+      () => Padding(
+        padding: const EdgeInsets.only(right: 8),
+        child: FilterChip(
+          label: Text(label),
+          selected: _controller.selectedFilter.value == value,
+          onSelected: (selected) {
+            if (selected) {
+              _controller.setSelectedFilter(value);
+            }
+          },
+        ),
+      ),
+    );
   }
 
   Widget _buildEmployeeCard(BuildContext context, UserModel employee) {
@@ -326,10 +335,7 @@ class _EmployeeListScreenState extends State<EmployeeListScreen> {
             Row(
               children: [
                 Chip(
-                  label: const Text(
-                    'EMPLOYEE',
-                    style: TextStyle(fontSize: 11),
-                  ),
+                  label: const Text('EMPLOYEE', style: TextStyle(fontSize: 11)),
                   backgroundColor: colorScheme.secondaryContainer,
                 ),
                 const SizedBox(width: 8),
@@ -357,10 +363,7 @@ class _EmployeeListScreenState extends State<EmployeeListScreen> {
               value: 'toggle',
               child: Row(
                 children: [
-                  Icon(
-                    isActive ? Icons.block : Icons.check_circle,
-                    size: 20,
-                  ),
+                  Icon(isActive ? Icons.block : Icons.check_circle, size: 20),
                   const SizedBox(width: 8),
                   Text(isActive ? 'Deactivate' : 'Activate'),
                 ],

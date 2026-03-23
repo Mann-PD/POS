@@ -11,13 +11,9 @@ import 'modules/authentication/auth_controller.dart';
 import 'modules/authentication/login_screen.dart';
 import 'modules/authentication/inactivity_wrapper.dart';
 import 'modules/authentication/session_manager.dart';
-import 'modules/pos/pos_home_screen.dart';
 import 'modules/pos/controllers/cart_controller.dart';
-import 'modules/admin/admin_dashboard.dart';
-import 'modules/super_admin/super_admin_dashboard.dart';
-import 'modules/reports/viewer_reports_dashboard.dart';
-import 'routing/app_routes.dart';
 import 'routing/role_based_router.dart';
+import 'routing/route_guard.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -50,13 +46,10 @@ class MyApp extends StatelessWidget {
           brightness: Brightness.light,
         ),
       ),
-      routes: {
-        AppRoutes.login: (context) => const LoginScreen(),
-        AppRoutes.employeeDashboard: (context) => const PosHomeScreen(),
-        AppRoutes.adminDashboard: (context) => const AdminDashboard(),
-        AppRoutes.superAdminDashboard: (context) => const SuperAdminDashboard(),
-        AppRoutes.viewerDashboard: (context) => const ViewerReportsDashboard(),
-      },
+      // All route access is validated by RouteGuard before the page is built.
+      // Protected routes require an authenticated user whose role matches the route.
+      // Any mismatch → redirect to LoginScreen.
+      onGenerateRoute: RouteGuard.onGenerateRoute,
       home: const InactivityWrapper(
         child: AuthWrapper(),
       ),
@@ -244,10 +237,15 @@ class _AuthWrapperState extends State<AuthWrapper> {
             final UserModel userData = userSnapshot.data!;
             final String route = RoleBasedRouter.getInitialRoute(userData.role);
 
-            // Navigate to the appropriate dashboard
+            // Navigate to the appropriate dashboard.
+            // IMPORTANT: pass userData as arguments so RouteGuard can
+            // validate the role synchronously without an async Firestore call.
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (mounted) {
-                Navigator.of(context).pushReplacementNamed(route);
+                Navigator.of(context).pushReplacementNamed(
+                  route,
+                  arguments: userData,
+                );
               }
             });
 

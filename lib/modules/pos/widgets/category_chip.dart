@@ -36,7 +36,7 @@ class CategoryChip extends StatelessWidget {
         side: BorderSide(
           color: isSelected
               ? colorScheme.primary
-              : colorScheme.outline.withOpacity(0.3),
+              : colorScheme.outline.withValues(alpha: 0.3),
           width: isSelected ? 1.5 : 1,
         ),
       ),

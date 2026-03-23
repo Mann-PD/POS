@@ -364,7 +364,7 @@ class _SettingTile extends StatelessWidget {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: BorderSide(
-          color: colorScheme.outline.withOpacity(0.15),
+          color: colorScheme.outline.withValues(alpha: 0.15),
         ),
       ),
       child: ListTile(

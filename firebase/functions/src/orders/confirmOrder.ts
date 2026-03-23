@@ -120,12 +120,16 @@ export const confirmOrder = functions.https.onCall(async (data, context) => {
       }
 
       // ── 2. Validate all products and compute inventory deductions ──────────
+      const PRICE_TOLERANCE = 0.01;
+
       const inventoryUpdates: Array<{
         productRef: admin.firestore.DocumentReference;
         newStock: number;
         quantity: number;
         productId: string;
       }> = [];
+
+      let calculatedTotalAmount = 0;
 
       for (const item of payload.items) {
         const productRef = db.collection('products').doc(item.productId);
@@ -158,7 +162,30 @@ export const confirmOrder = functions.https.onCall(async (data, context) => {
           );
         }
 
+        // ── Price integrity check 1: priceSnapshot must match product.price ──
+        if (Math.abs(item.priceSnapshot - product.price) > PRICE_TOLERANCE) {
+          throw new functions.https.HttpsError(
+            'invalid-argument',
+            `Price mismatch for product ${product.name}: ` +
+            `client sent ${item.priceSnapshot}, server has ${product.price}`
+          );
+        }
+
         const qty = item.quantityOrWeight;
+
+        // ── Price integrity check 2: totalPrice must equal priceSnapshot × qty ──
+        const expectedItemTotal = product.price * qty;
+        if (Math.abs(item.totalPrice - expectedItemTotal) > PRICE_TOLERANCE) {
+          throw new functions.https.HttpsError(
+            'invalid-argument',
+            `Item total mismatch for product ${product.name}: ` +
+            `client sent ${item.totalPrice}, expected ${expectedItemTotal} (${product.price} × ${qty})`
+          );
+        }
+
+        // Accumulate server-calculated total using authoritative price
+        calculatedTotalAmount += expectedItemTotal;
+
         if (product.stock < qty) {
           throw new functions.https.HttpsError(
             'failed-precondition',
@@ -182,6 +209,15 @@ export const confirmOrder = functions.https.onCall(async (data, context) => {
         });
       }
 
+      // ── Price integrity check 3: totalAmount must match server recalculation ──
+      if (Math.abs(payload.totalAmount - calculatedTotalAmount) > PRICE_TOLERANCE) {
+        throw new functions.https.HttpsError(
+          'invalid-argument',
+          `Order totalAmount mismatch: client sent ${payload.totalAmount}, ` +
+          `server calculated ${calculatedTotalAmount}`
+        );
+      }
+
       // ── 3. Create order document ───────────────────────────────────────────
       const orderRef = db.collection('orders').doc();
       const orderId = orderRef.id;
@@ -191,7 +227,7 @@ export const confirmOrder = functions.https.onCall(async (data, context) => {
         shopId,
         customerId,
         employeeId: userId,
-        totalAmount: payload.totalAmount,
+        totalAmount: calculatedTotalAmount,  // server-calculated; never trust client
         paymentMethod,
         paymentStatus: PaymentStatus.SUCCESS,   // 'Success'
         orderStatus: OrderStatus.LOCKED,        // 'locked' — immediately locked
@@ -205,6 +241,7 @@ export const confirmOrder = functions.https.onCall(async (data, context) => {
         transaction.set(itemRef, {
           orderItemId: itemRef.id,
           orderId,
+          shopId,
           productId: item.productId,
           quantityOrWeight: item.quantityOrWeight,
           priceSnapshot: item.priceSnapshot,
@@ -241,7 +278,7 @@ export const confirmOrder = functions.https.onCall(async (data, context) => {
         entityType: 'order',
         entityId: orderId,
         timestamp: now,
-        totalAmount: payload.totalAmount,
+        totalAmount: calculatedTotalAmount,  // server-calculated
         paymentMethod,
         itemCount: payload.items.length,
       });
@@ -250,7 +287,7 @@ export const confirmOrder = functions.https.onCall(async (data, context) => {
         success: true,
         orderId,
         orderStatus: OrderStatus.LOCKED,
-        totalAmount: payload.totalAmount,
+        totalAmount: calculatedTotalAmount,  // server-calculated
         paymentMethod,
         itemCount: payload.items.length,
       };

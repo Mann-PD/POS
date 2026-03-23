@@ -1,73 +1,76 @@
 import 'app_routes.dart';
 
-/// Role-based router for determining initial route based on user role
-/// 
-/// This router maps user roles to their corresponding dashboard routes.
-/// It handles role string normalization to support various input formats.
+/// Maps user roles to routes and validates role→route access.
+///
+/// Role strings use canonical Firestore values: 'SuperAdmin', 'Admin',
+/// 'Employee', 'Viewer'.
 class RoleBasedRouter {
-  RoleBasedRouter._(); // Private constructor to prevent instantiation
+  RoleBasedRouter._();
 
-  /// Determines the initial route based on user role
-  /// 
-  /// [role] - The user's role string (case-insensitive, supports various formats)
-  /// 
-  /// Returns the route string for the user's dashboard:
-  /// - 'employee' → Employee dashboard (POS home)
-  /// - 'admin' → Admin dashboard
-  /// - 'super_admin' → SuperAdmin dashboard
-  /// - 'viewer' → Viewer reports dashboard (read-only)
-  ///
-  /// Accepts standard role values (case-insensitive): super_admin, admin, employee, viewer.
-  /// 
-  /// Throws [ArgumentError] if role is null, empty, or unrecognized
+  // ── Role → initial route ──────────────────────────────────────────────────
+
+  /// Returns the canonical initial route for [role].
+  /// Throws [ArgumentError] for an empty or unrecognised role.
   static String getInitialRoute(String role) {
     if (role.isEmpty) {
-      throw ArgumentError.value(
-        role,
-        'role',
-        'Role cannot be empty',
-      );
+      throw ArgumentError.value(role, 'role', 'Role cannot be empty');
     }
 
-    // Normalize: lowercase, collapse underscores/hyphens/spaces
-    final normalizedRole = role.toLowerCase().replaceAll(RegExp(r'[_\s-]'), '');
-
-    switch (normalizedRole) {
+    final normalised = role.toLowerCase().replaceAll(RegExp(r'[_\s-]'), '');
+    switch (normalised) {
       case 'employee':
-        return AppRoutes.employeeDashboard;
-
+        return AppRoutes.employee;
       case 'admin':
-        return AppRoutes.adminDashboard;
-
+        return AppRoutes.admin;
       case 'superadmin':
-        return AppRoutes.superAdminDashboard;
-
+        return AppRoutes.superAdmin;
       case 'viewer':
-        return AppRoutes.viewerDashboard;
-
+        return AppRoutes.viewer;
       default:
         throw ArgumentError.value(
           role,
           'role',
-          'Unrecognized role. Supported roles: super_admin, admin, employee, viewer',
+          'Unrecognised role. Supported: SuperAdmin, Admin, Employee, Viewer',
         );
     }
   }
 
-  /// Checks if a role is valid
-  /// 
-  /// [role] - The role string to validate
-  /// 
-  /// Returns true if the role is recognized, false otherwise
-  static bool isValidRole(String role) {
-    if (role.isEmpty) {
-      return false;
-    }
+  // ── Route → allowed roles ─────────────────────────────────────────────────
 
+  /// Returns the set of canonical role strings permitted to access [route].
+  /// Returns an empty set for public/unknown routes (they are handled separately).
+  static Set<String> allowedRoles(String route) {
+    switch (route) {
+      case AppRoutes.employee:
+      case AppRoutes.employeeDashboard:
+        return {'Employee'};
+
+      case AppRoutes.admin:
+      case AppRoutes.adminDashboard:
+        return {'Admin'};
+
+      case AppRoutes.superAdmin:
+      case AppRoutes.superAdminDashboard:
+        return {'SuperAdmin'};
+
+      case AppRoutes.viewer:
+      case AppRoutes.viewerDashboard:
+        return {'Viewer', 'Admin', 'SuperAdmin'};
+
+      default:
+        return {};
+    }
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+
+  /// Returns true if [role] is a recognised, non-empty role string.
+  static bool isValidRole(String role) {
+    if (role.isEmpty) return false;
     try {
       getInitialRoute(role);
       return true;
-    } catch (e) {
+    } catch (_) {
       return false;
     }
   }

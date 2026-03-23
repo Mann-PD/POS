@@ -396,7 +396,7 @@ class _InventoryAdjustmentScreenState extends State<InventoryAdjustmentScreen> {
                       margin: const EdgeInsets.only(bottom: 12),
                       child: ListTile(
                         leading: CircleAvatar(
-                          backgroundColor: stockColor.withOpacity(0.1),
+                          backgroundColor: stockColor.withValues(alpha: 0.1),
                           child: Icon(
                             Icons.inventory_2,
                             color: stockColor,

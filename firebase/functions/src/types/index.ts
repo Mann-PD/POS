@@ -25,7 +25,7 @@ export enum ProductStatus {
 
 export enum OrderStatus {
   PENDING = 'pending',
-  CONFIRMED = 'confirmed',
+  CONFIRMED = 'confirmed', // Deprecated: keeping only for types, but removing from logic
   LOCKED = 'locked',
   CANCELLED = 'cancelled'
 }
@@ -87,6 +87,7 @@ export interface Order {
 export interface OrderItem {
   orderItemId: string;
   orderId: string;
+  shopId: string;
   productId: string;
   quantityOrWeight: number;
   priceSnapshot: number;
@@ -106,7 +107,8 @@ export interface Expense {
   shopId: string;
   amount: number;
   description: string;
-  createdAt: FirebaseFirestore.Timestamp;
+  date?: FirebaseFirestore.Timestamp; // User-selected date
+  createdAt: FirebaseFirestore.Timestamp; // System timestamp
 }
 
 export interface InventoryLog {

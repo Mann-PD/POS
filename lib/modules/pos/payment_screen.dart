@@ -317,7 +317,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
                 color: colorScheme.surfaceContainerHighest,
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
+                    color: Colors.black.withValues(alpha: 0.05),
                     blurRadius: 8,
                     offset: const Offset(0, -2),
                   ),
@@ -415,7 +415,7 @@ class _PaymentMethodCard extends StatelessWidget {
         side: BorderSide(
           color: isSelected
               ? colorScheme.primary
-              : colorScheme.outline.withOpacity(0.2),
+              : colorScheme.outline.withValues(alpha: 0.2),
           width: isSelected ? 2 : 1,
         ),
       ),

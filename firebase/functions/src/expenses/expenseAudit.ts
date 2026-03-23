@@ -48,6 +48,7 @@ interface CreateExpenseRequest {
   shopId: string;
   amount: number;
   description: string;
+  date?: string | number | { seconds: number } | Date;
 }
 
 interface UpdateExpenseRequest {
@@ -55,6 +56,7 @@ interface UpdateExpenseRequest {
   shopId: string;
   amount?: number;
   description?: string;
+  date?: string | number | { seconds: number } | Date;
 }
 
 /**
@@ -217,6 +219,13 @@ export const createExpense = functions.https.onCall(async (data, context) => {
     // Enforce amount > 0
     const amount = validatePositiveNumber(request.amount, 'amount');
 
+    // Ensure date is not in the future if provided
+    let parsedDate: admin.firestore.Timestamp | undefined;
+    if (request.date != null) {
+      const dateObj = validateNotFutureDate(request.date, 'date');
+      parsedDate = admin.firestore.Timestamp.fromDate(dateObj);
+    }
+
     // Validate admin or super admin role
     const user = await validateAdminOrSuper(userId, shopId);
 
@@ -234,6 +243,9 @@ export const createExpense = functions.https.onCall(async (data, context) => {
         description,
         createdAt: admin.firestore.Timestamp.now(),
       };
+      if (parsedDate) {
+        expense.date = parsedDate;
+      }
 
       transaction.set(expenseRef, expense);
 
@@ -255,6 +267,7 @@ export const createExpense = functions.https.onCall(async (data, context) => {
             amount: result.amount,
             description: result.description,
             shopId,
+            date: parsedDate,
           }
         );
 
@@ -343,6 +356,12 @@ export const updateExpense = functions.https.onCall(async (data, context) => {
         updateData.description = newDescription;
       }
 
+      // Update date if provided
+      if (request.date != null) {
+        const dateObj = validateNotFutureDate(request.date, 'date');
+        updateData.date = admin.firestore.Timestamp.fromDate(dateObj);
+      }
+
       // Check if there are any changes
       if (Object.keys(updateData).length === 0) {
         throw new functions.https.HttpsError(
@@ -362,6 +381,8 @@ export const updateExpense = functions.https.onCall(async (data, context) => {
         newAmount: updateData.amount || existingExpense.amount,
         oldDescription: existingExpense.description,
         newDescription: updateData.description || existingExpense.description,
+        oldDate: existingExpense.date,
+        newDate: updateData.date || existingExpense.date,
       };
     }).then(async (result) => {
       // After transaction succeeds, create audit log
@@ -376,6 +397,8 @@ export const updateExpense = functions.https.onCall(async (data, context) => {
             newAmount: result.newAmount,
             oldDescription: result.oldDescription,
             newDescription: result.newDescription,
+            oldDate: result.oldDate,
+            newDate: result.newDate,
             shopId,
           }
         );

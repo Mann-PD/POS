@@ -63,71 +63,85 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   Future<void> _handleLogin() async {
-    if (!_formKey.currentState!.validate()) {
-      return;
-    }
+  if (!_formKey.currentState!.validate()) {
+    return;
+  }
+
+  setState(() {
+    _isLoading = true;
+    _errorMessage = null;
+  });
+
+  try {
+    final UserModel user = await _authController.login(
+      _emailController.text,
+      _passwordController.text,
+    );
+
+    // Audit log (non-blocking)
+    try {
+      final logAuthEvent =
+          FirebaseFunctions.instance.httpsCallable('logAuthEvent');
+      await logAuthEvent.call({
+        'action': 'LOGIN_SUCCESS',
+        'shopId': user.shopId,
+      });
+    } catch (_) {}
+
+    // Register session
+    await SessionManager.registerActiveSession(user.userId);
+
+    if (!mounted) return;
 
     setState(() {
-      _isLoading = true;
+      _isLoading = false;
       _errorMessage = null;
     });
 
+    // Show success message
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Welcome back, ${user.name}!'),
+        backgroundColor: Theme.of(context).colorScheme.primary,
+      ),
+    );
+
+    // 🔥 CRITICAL FIX — NAVIGATION
+    print("ROLE: ${user.role}");
+
+    if (user.role == 'Admin') {
+      Navigator.pushReplacementNamed(context, '/admin');
+    } else if (user.role == 'Employee') {
+      Navigator.pushReplacementNamed(context, '/employee');
+    } else if (user.role == 'Viewer') {
+      Navigator.pushReplacementNamed(context, '/viewer');
+    } else if (user.role == 'SuperAdmin') {
+      Navigator.pushReplacementNamed(context, '/super_admin');
+    } else {
+      // fallback safety
+      Navigator.pushReplacementNamed(context, '/');
+    }
+  } catch (e) {
+    // Audit failure (non-blocking)
     try {
-      final UserModel user = await _authController.login(
-        _emailController.text,
-        _passwordController.text,
-      );
+      final logLoginFailure =
+          FirebaseFunctions.instance.httpsCallable('logLoginFailure');
+      await logLoginFailure.call({
+        'email': _emailController.text.trim(),
+        'errorMessage':
+            e.toString().replaceFirst('Exception: ', ''),
+      });
+    } catch (_) {}
 
-      // Login successful - audit via callable (no direct Firestore write)
-      try {
-        final logAuthEvent = FirebaseFunctions.instance.httpsCallable('logAuthEvent');
-        await logAuthEvent.call(<String, dynamic>{
-          'action': 'LOGIN_SUCCESS',
-          'shopId': user.shopId,
-        });
-      } catch (_) {
-        // Non-blocking; do not fail login if audit log fails
-      }
-
-      // Register active session for concurrent-login control (best-effort).
-      await SessionManager.registerActiveSession(user.userId);
-
-      // Login successful - user is authenticated
-      // Navigation will be handled by routing system
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-          _errorMessage = null;
-        });
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Welcome back, ${user.name}!'),
-            backgroundColor: Theme.of(context).colorScheme.primary,
-            behavior: SnackBarBehavior.floating,
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      }
-    } catch (e) {
-      // Login failure — audit via logLoginFailure (unauthenticated callable; logAuthEvent requires auth)
-      try {
-        final logLoginFailure = FirebaseFunctions.instance.httpsCallable('logLoginFailure');
-        await logLoginFailure.call(<String, dynamic>{
-          'email': _emailController.text.trim(),
-          'errorMessage': e.toString().replaceFirst('Exception: ', ''),
-        });
-      } catch (_) {
-        // Non-blocking; do not fail UX if audit log fails
-      }
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-          _errorMessage = e.toString().replaceFirst('Exception: ', '');
-        });
-      }
+    if (mounted) {
+      setState(() {
+        _isLoading = false;
+        _errorMessage =
+            e.toString().replaceFirst('Exception: ', '');
+      });
     }
   }
+}
 
   @override
   Widget build(BuildContext context) {
@@ -145,7 +159,7 @@ class _LoginScreenState extends State<LoginScreen>
             colors: [
               colorScheme.primaryContainer,
               colorScheme.surface,
-              colorScheme.secondaryContainer.withOpacity(0.3),
+              colorScheme.secondaryContainer.withValues(alpha: 0.3),
             ],
           ),
         ),
@@ -266,7 +280,7 @@ class _LoginScreenState extends State<LoginScreen>
           borderRadius: BorderRadius.circular(12),
         ),
         filled: true,
-        fillColor: colorScheme.surfaceContainerHighest.withOpacity(0.3),
+        fillColor: colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
       ),
       validator: (value) {
         if (value == null || value.trim().isEmpty) {
@@ -307,7 +321,7 @@ class _LoginScreenState extends State<LoginScreen>
           borderRadius: BorderRadius.circular(12),
         ),
         filled: true,
-        fillColor: colorScheme.surfaceContainerHighest.withOpacity(0.3),
+        fillColor: colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
       ),
       validator: (value) {
         if (value == null || value.isEmpty) {

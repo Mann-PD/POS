@@ -1,23 +1,35 @@
-/// Application route names
-/// 
-/// This file defines all route names used throughout the application.
-/// Route names should be used consistently to avoid typos and ensure
-/// type safety when navigating.
+/// Application route names.
+///
+/// Protected routes require a valid authenticated user whose role matches.
+/// The guard is enforced in [RouteGuard.onGenerateRoute].
 class AppRoutes {
   AppRoutes._(); // Private constructor to prevent instantiation
 
-  /// Authentication routes
+  // ── Authentication ────────────────────────────────────────────────────────
   static const String login = '/login';
 
-  /// Dashboard routes
-  /// 
-  /// Each role has its own dashboard route:
-  /// - Employee: POS home (billing interface)
-  /// - Admin: Admin dashboard (shop management)
-  /// - Super Admin: Super Admin dashboard (system-wide management)
-  /// - Viewer: Viewer dashboard
-  static const String employeeDashboard = '/employee-dashboard';
-  static const String adminDashboard = '/admin-dashboard';
-  static const String superAdminDashboard = '/super-admin-dashboard';
-  static const String viewerDashboard = '/viewer-dashboard';
+  // ── Protected dashboard routes ────────────────────────────────────────────
+  // Canonical short forms (per requirements)
+  static const String employee    = '/employee';
+  static const String admin       = '/admin';
+  static const String superAdmin  = '/super_admin';
+  static const String viewer      = '/viewer';
+
+  // Legacy long-form aliases (kept for backwards compatibility)
+  static const String employeeDashboard    = '/employee-dashboard';
+  static const String adminDashboard       = '/admin-dashboard';
+  static const String superAdminDashboard  = '/super-admin-dashboard';
+  static const String viewerDashboard      = '/viewer-dashboard';
+
+  /// All route names that require authentication and role validation.
+  static const List<String> protectedRoutes = [
+    employee,
+    admin,
+    superAdmin,
+    viewer,
+    employeeDashboard,
+    adminDashboard,
+    superAdminDashboard,
+    viewerDashboard,
+  ];
 }

@@ -39,8 +39,8 @@ class ProductCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         side: BorderSide(
           color: isOutOfStock
-              ? colorScheme.error.withOpacity(0.3)
-              : colorScheme.outline.withOpacity(0.1),
+              ? colorScheme.error.withValues(alpha: 0.3)
+              : colorScheme.outline.withValues(alpha: 0.1),
           width: 1,
         ),
       ),
@@ -59,7 +59,7 @@ class ProductCard extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: isOutOfStock
                         ? colorScheme.surfaceContainerHighest
-                        : colorScheme.primaryContainer.withOpacity(0.3),
+                        : colorScheme.primaryContainer.withValues(alpha: 0.3),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Icon(
@@ -78,7 +78,7 @@ class ProductCard extends StatelessWidget {
                 style: theme.textTheme.titleSmall?.copyWith(
                   fontWeight: FontWeight.w600,
                   color: isOutOfStock
-                      ? colorScheme.onSurface.withOpacity(0.6)
+                      ? colorScheme.onSurface.withValues(alpha: 0.6)
                       : null,
                 ),
                 maxLines: 2,
@@ -91,7 +91,7 @@ class ProductCard extends StatelessWidget {
                 style: theme.textTheme.titleMedium?.copyWith(
                   fontWeight: FontWeight.bold,
                   color: isOutOfStock
-                      ? colorScheme.onSurface.withOpacity(0.6)
+                      ? colorScheme.onSurface.withValues(alpha: 0.6)
                       : colorScheme.primary,
                 ),
               ),
@@ -124,7 +124,7 @@ class ProductCard extends StatelessWidget {
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: isOutOfStock
                             ? colorScheme.error
-                            : colorScheme.onSurface.withOpacity(0.7),
+                            : colorScheme.onSurface.withValues(alpha: 0.7),
                         fontSize: 10,
                       ),
                       maxLines: 1,

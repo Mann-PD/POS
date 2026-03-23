@@ -163,7 +163,7 @@ class _GlobalSummaryCard extends StatelessWidget {
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: colorScheme.outline.withOpacity(0.2)),
+        side: BorderSide(color: colorScheme.outline.withValues(alpha: 0.2)),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),

@@ -149,7 +149,7 @@ class _DailySalesSummaryScreenState extends State<DailySalesSummaryScreen> {
               color: colorScheme.surfaceContainerHighest,
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
+                  color: Colors.black.withValues(alpha: 0.05),
                   blurRadius: 4,
                   offset: const Offset(0, 2),
                 ),
@@ -345,7 +345,7 @@ class _SummaryCard extends StatelessWidget {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
         side: BorderSide(
-          color: colorScheme.outline.withOpacity(0.1),
+          color: colorScheme.outline.withValues(alpha: 0.1),
         ),
       ),
       child: Padding(
@@ -356,7 +356,7 @@ class _SummaryCard extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: color.withOpacity(0.1),
+                color: color.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Icon(icon, color: color, size: 24),
@@ -416,7 +416,7 @@ class _OrderListItem extends StatelessWidget {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: BorderSide(
-          color: colorScheme.outline.withOpacity(0.1),
+          color: colorScheme.outline.withValues(alpha: 0.1),
         ),
       ),
       child: ListTile(

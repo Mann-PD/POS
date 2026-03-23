@@ -14,13 +14,10 @@ class CartScreen extends StatelessWidget {
     final colorScheme = theme.colorScheme;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Cart'),
-        elevation: 0,
-      ),
+      appBar: AppBar(title: const Text('Cart'), elevation: 0),
       body: Obx(() {
         final cartController = Get.find<CartController>();
-        
+
         if (cartController.isEmpty) {
           return Center(
             child: Column(
@@ -32,10 +29,7 @@ class CartScreen extends StatelessWidget {
                   color: colorScheme.outline,
                 ),
                 const SizedBox(height: 24),
-                Text(
-                  'Your cart is empty',
-                  style: theme.textTheme.titleLarge,
-                ),
+                Text('Your cart is empty', style: theme.textTheme.titleLarge),
                 const SizedBox(height: 8),
                 Text(
                   'Add products to get started',
@@ -95,9 +89,8 @@ class CartScreen extends StatelessWidget {
                     onEdit: () async {
                       final quantity = await showDialog<double>(
                         context: context,
-                        builder: (context) => QuantitySelectionDialog(
-                          product: item.product,
-                        ),
+                        builder: (context) =>
+                            QuantitySelectionDialog(product: item.product),
                       );
 
                       if (quantity != null && quantity > 0) {
@@ -132,7 +125,7 @@ class CartScreen extends StatelessWidget {
                 color: colorScheme.surfaceContainerHighest,
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
+                    color: Colors.black.withValues(alpha: 0.05),
                     blurRadius: 8,
                     offset: const Offset(0, -2),
                   ),
@@ -225,9 +218,7 @@ class _CartItemCard extends StatelessWidget {
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: BorderSide(
-          color: colorScheme.outline.withOpacity(0.1),
-        ),
+        side: BorderSide(color: colorScheme.outline.withValues(alpha: 0.1)),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -271,13 +262,13 @@ class _CartItemCard extends StatelessWidget {
                     children: [
                       IconButton(
                         icon: const Icon(Icons.remove_circle_outline),
-                        onPressed: item.quantityOrWeight <=
-                                (_isWeightBased ? 0.1 : 1)
+                        onPressed:
+                            item.quantityOrWeight <= (_isWeightBased ? 0.1 : 1)
                             ? null
                             : () => onQuantityUpdate(
-                                  item.quantityOrWeight -
-                                      (_isWeightBased ? 0.1 : 1),
-                                ),
+                                item.quantityOrWeight -
+                                    (_isWeightBased ? 0.1 : 1),
+                              ),
                         iconSize: 20,
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(),
@@ -295,9 +286,9 @@ class _CartItemCard extends StatelessWidget {
                         onPressed: item.quantityOrWeight >= item.product.stock
                             ? null
                             : () => onQuantityUpdate(
-                                  item.quantityOrWeight +
-                                      (_isWeightBased ? 0.1 : 1),
-                                ),
+                                item.quantityOrWeight +
+                                    (_isWeightBased ? 0.1 : 1),
+                              ),
                         iconSize: 20,
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(),
@@ -329,10 +320,7 @@ class _CartItemCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 IconButton(
-                  icon: Icon(
-                    Icons.delete_outline,
-                    color: colorScheme.error,
-                  ),
+                  icon: Icon(Icons.delete_outline, color: colorScheme.error),
                   onPressed: onRemove,
                   tooltip: 'Remove item',
                 ),

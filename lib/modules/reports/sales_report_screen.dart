@@ -269,7 +269,7 @@ class _SummaryCard extends StatelessWidget {
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: colorScheme.outline.withOpacity(0.2)),
+        side: BorderSide(color: colorScheme.outline.withValues(alpha: 0.2)),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -278,7 +278,7 @@ class _SummaryCard extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: color.withOpacity(0.1),
+                color: color.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Icon(icon, color: color, size: 28),

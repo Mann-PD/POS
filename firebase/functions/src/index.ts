@@ -90,6 +90,12 @@ export {
   setActiveSession,
 } from './auth/session';
 
+// Login failure lockout system
+export {
+  recordLoginFailure,
+  resetLoginFailure,
+} from './auth/loginLockout';
+
 // Export authentication Firestore triggers
 export {
   onUserStatusChange,

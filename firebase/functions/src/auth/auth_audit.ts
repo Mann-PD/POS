@@ -454,6 +454,10 @@ export const bootstrapFirstUser = functions.https.onCall(async (_data, context) 
     const data = userSnap.data()!;
     const status = (data.status ?? 'Inactive').toString().trim();
 
+    if (data.role !== Role.SuperAdmin) {
+      return { activated: false, reason: 'not_super_admin' };
+    }
+
     if (status === UserStatus.ACTIVE) {
       return { activated: false, reason: 'already_active' };
     }
