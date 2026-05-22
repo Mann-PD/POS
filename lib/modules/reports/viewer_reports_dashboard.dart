@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/observability/error_ui.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../authentication/auth_controller.dart';
@@ -7,6 +8,8 @@ import 'reports_dashboard.dart';
 import 'reports_service.dart';
 import '../../data/models/expense_model.dart';
 import '../../data/models/user_model.dart';
+import '../../routing/permission_gate.dart';
+import '../../routing/screen_permission.dart';
 
 /// Viewer Reports Dashboard — read-only: Sales reports, Expense summary, Order history.
 /// No billing, inventory, or product edit.
@@ -39,7 +42,11 @@ class _ViewerReportsDashboardState extends State<ViewerReportsDashboard> {
           .doc(user.uid)
           .get();
       if (doc.exists) {
-        final u = UserModel.fromMap(doc.data() as Map<String, dynamic>);
+        final u = UserModel.tryFromDocument(doc);
+        if (u == null) {
+          setState(() => _loading = false);
+          return;
+        }
         setState(() {
           _shopId = u.shopId;
           _loading = false;
@@ -47,7 +54,8 @@ class _ViewerReportsDashboardState extends State<ViewerReportsDashboard> {
       } else {
         setState(() => _loading = false);
       }
-    } catch (_) {
+    } catch (e, st) {
+      reportCatch(e, stackTrace: st, tag: 'ViewerReportsDashboard._load');
       setState(() => _loading = false);
     }
   }
@@ -113,9 +121,18 @@ class _ViewerReportsDashboardState extends State<ViewerReportsDashboard> {
         ),
         body: TabBarView(
           children: [
-            const ReportsDashboard(readOnly: true),
-            _ViewerExpenseSummary(shopId: _shopId),
-            OrderHistoryScreen(readOnly: true, shopId: _shopId),
+            const PermissionGate(
+              permission: ScreenPermission.reportsDashboard,
+              child: ReportsDashboard(readOnly: true),
+            ),
+            PermissionGate(
+              permission: ScreenPermission.expenseReport,
+              child: _ViewerExpenseSummary(shopId: _shopId),
+            ),
+            PermissionGate(
+              permission: ScreenPermission.orderHistory,
+              child: OrderHistoryScreen(readOnly: true, shopId: _shopId),
+            ),
           ],
         ),
       ),

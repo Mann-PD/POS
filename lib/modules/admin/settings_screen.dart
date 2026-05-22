@@ -1,9 +1,15 @@
 import 'package:flutter/material.dart';
+import '../../core/observability/error_ui.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../core/firestore/firestore_parse.dart';
+import '../../core/firestore/firestore_rule_safe_update.dart';
 import '../../data/models/setting_model.dart';
 import '../../data/models/user_model.dart';
 import '../../core/rbac/role_constants.dart';
+import '../../core/firestore/firestore_stream_cache.dart';
+import '../../routing/permission_gate.dart';
+import '../../routing/screen_permission.dart';
 
 /// Settings screen: Shop-level (Admin) or System-level (Super Admin).
 /// Read/write per Firestore rules; future-only application per requirements.
@@ -18,6 +24,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String? _shopId;
   bool _isSuperAdmin = false;
   bool _loading = true;
+  Stream<QuerySnapshot<Map<String, dynamic>>>? _settingsStream;
 
   @override
   void initState() {
@@ -37,21 +44,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
           .doc(user.uid)
           .get();
       if (doc.exists) {
-        final u = UserModel.fromMap(doc.data() as Map<String, dynamic>);
+        final u = UserModel.tryFromDocument(doc);
+        if (u == null) {
+          setState(() => _loading = false);
+          return;
+        }
         setState(() {
           _shopId = u.shopId;
           _isSuperAdmin = u.role == RoleConstants.superAdmin;
           _loading = false;
+          _initSettingsStream();
         });
       } else {
         setState(() => _loading = false);
       }
-    } catch (_) {
+    } catch (e, st) {
+      reportCatch(e, stackTrace: st, tag: 'AdminSettingsScreen._load');
       setState(() => _loading = false);
     }
   }
 
-  Query _buildQuery() {
+  void _initSettingsStream() {
+    final query = _buildQuery();
+    final key = _isSuperAdmin
+        ? 'admin_settings_system'
+        : 'admin_settings_shop_${_shopId ?? ''}';
+    _settingsStream ??=
+        FirestoreStreamCache.instance.querySnapshots(query, key: key);
+  }
+
+  Query<Map<String, dynamic>> _buildQuery() {
     if (_isSuperAdmin) {
       return FirebaseFirestore.instance
           .collection('settings')
@@ -68,6 +90,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    return PermissionGate(
+      permission: ScreenPermission.adminSettings,
+      child: _buildContent(context),
+    );
+  }
+
+  Widget _buildContent(BuildContext context) {
     if (_loading) {
       return Scaffold(
         appBar: AppBar(title: const Text('Settings')),
@@ -86,8 +115,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ],
       ),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: _buildQuery().snapshots(),
+      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+        stream: _settingsStream,
         builder: (context, snapshot) {
           if (snapshot.hasError) {
             return Center(child: Text('Error: ${snapshot.error}'));
@@ -97,8 +126,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
           }
           final docs = snapshot.data?.docs ?? [];
           final settings = docs
-              .map((d) => SettingModel.fromMap(
-                  {...d.data() as Map<String, dynamic>, 'settingId': d.id}))
+              .map((d) {
+                final map = FirestoreParse.queryDocumentData(d);
+                if (map == null) return null;
+                return SettingModel.tryFromMap({...map, 'settingId': d.id});
+              })
+              .whereType<SettingModel>()
               .toList();
           if (settings.isEmpty) {
             return Center(
@@ -248,10 +281,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
           );
         }
       } else {
-        await db.collection('settings').doc(existing.settingId).update({
-          'value': value,
-          'updatedAt': timestamp,
-        });
+        await db.collection('settings').doc(existing.settingId).update(
+              FirestoreRuleSafeUpdate.setting(
+                existing,
+                changes: {
+                  'value': value,
+                  'updatedAt': timestamp,
+                },
+              ),
+            );
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Setting updated')),

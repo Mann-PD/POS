@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:get/get.dart';
 import '../../../data/models/user_model.dart';
-import '../../../core/rbac/role_constants.dart';
 import 'employee_controller.dart';
 
 /// Employee Form Screen - Create New Employee
@@ -29,15 +29,18 @@ class _EmployeeFormScreenState extends State<EmployeeFormScreen> {
   @override
   void initState() {
     super.initState();
-    _loadUserData();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _loadUserData(context);
+    });
   }
 
-  Future<void> _loadUserData() async {
+  Future<void> _loadUserData(BuildContext pageContext) async {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
-        if (mounted) {
-          Navigator.of(context).pop();
+        if (pageContext.mounted) {
+          Navigator.of(pageContext).pop();
         }
         return;
       }
@@ -48,23 +51,23 @@ class _EmployeeFormScreenState extends State<EmployeeFormScreen> {
           .get();
 
       if (userDoc.exists) {
-        final userData = UserModel.fromMap(
-          userDoc.data() as Map<String, dynamic>,
-        );
+        final userData = UserModel.tryFromDocument(userDoc);
+        if (userData == null) return;
+        if (!mounted) return;
         setState(() {
           _shopId = userData.shopId;
         });
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
           SnackBar(content: Text('Error loading user data: $e')),
         );
       }
     }
   }
 
-  Future<void> _createEmployee() async {
+  Future<void> _createEmployee(BuildContext pageContext) async {
     if (!_formKey.currentState!.validate()) {
       return;
     }
@@ -82,63 +85,49 @@ class _EmployeeFormScreenState extends State<EmployeeFormScreen> {
     _controller.setLoading(true);
 
     try {
-      // Check if email already exists in Firestore
-      final existingUser = await FirebaseFirestore.instance
-          .collection('users')
-          .where('email', isEqualTo: _emailController.text.trim())
-          .get();
-
-      if (existingUser.docs.isNotEmpty) {
-        throw Exception('An employee with this email already exists');
-      }
-
-      // Create Firebase Auth user
-      final UserCredential userCredential =
-          await FirebaseAuth.instance.createUserWithEmailAndPassword(
-        email: _emailController.text.trim(),
-        password: _passwordController.text,
-      );
-
-      final String userId = userCredential.user!.uid;
-
-      // Create Firestore user document
-      await FirebaseFirestore.instance.collection('users').doc(userId).set({
-        'userId': userId,
+      final result = await FirebaseFunctions.instance
+          .httpsCallable('createEmployeeUser')
+          .call({
         'name': _nameController.text.trim(),
         'email': _emailController.text.trim(),
         'phone': _phoneController.text.trim(),
-        'role': RoleConstants.employee,
         'shopId': _shopId!,
-        'status': 'Active',
-        'createdAt': FieldValue.serverTimestamp(),
+        'password': _passwordController.text,
       });
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Employee created successfully'),
-            backgroundColor: Colors.green,
-          ),
-        );
-        Navigator.of(context).pop();
+      if (result.data['success'] == true) {
+        if (pageContext.mounted) {
+          ScaffoldMessenger.of(pageContext).showSnackBar(
+            const SnackBar(
+              content: Text('Employee created successfully'),
+              backgroundColor: Colors.green,
+            ),
+          );
+          Navigator.of(pageContext).pop();
+        }
       }
-    } on FirebaseAuthException catch (e) {
-      String errorMessage;
+    } on FirebaseFunctionsException catch (e) {
+      String errorMessage = e.message ?? 'Error creating employee.';
       switch (e.code) {
-        case 'weak-password':
-          errorMessage = 'The password provided is too weak.';
-          break;
-        case 'email-already-in-use':
+        case 'already-exists':
           errorMessage = 'An account already exists for that email.';
           break;
-        case 'invalid-email':
-          errorMessage = 'The email address is invalid.';
+        case 'permission-denied':
+          errorMessage =
+              e.message ?? 'You do not have permission to create employees.';
           break;
-        default:
-          errorMessage = 'Error creating employee: ${e.message}';
+        case 'invalid-argument':
+          errorMessage = e.message ?? errorMessage;
+          break;
+        case 'unauthenticated':
+          errorMessage = 'Please sign in again.';
+          break;
+        case 'failed-precondition':
+          errorMessage = e.message ?? errorMessage;
+          break;
       }
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
           SnackBar(
             content: Text(errorMessage),
             backgroundColor: Colors.red,
@@ -146,8 +135,8 @@ class _EmployeeFormScreenState extends State<EmployeeFormScreen> {
         );
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
           SnackBar(
             content: Text('Error creating employee: $e'),
             backgroundColor: Colors.red,
@@ -288,7 +277,7 @@ class _EmployeeFormScreenState extends State<EmployeeFormScreen> {
                   Expanded(
                     flex: 2,
                     child: FilledButton(
-                      onPressed: _isLoading ? null : _createEmployee,
+                      onPressed: _isLoading ? null : () => _createEmployee(context),
                       style: FilledButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 16),
                       ),

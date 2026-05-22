@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../core/firestore/firestore_parse.dart';
 
 class UserModel {
   final String userId;
@@ -28,8 +29,8 @@ class UserModel {
   bool get isSuspended => status == 'Suspended';
 
   /// Normalize role to canonical: SuperAdmin, Admin, Employee, Viewer (matches Firestore/backend)
-  static String _normalizeRole(String? value) {
-    if (value == null || value.isEmpty) return '';
+  static String _normalizeRole(String value) {
+    if (value.isEmpty) return '';
     final lower = value.toLowerCase().replaceAll(RegExp(r'[_\s-]'), '');
     if (lower == 'superadmin') return 'SuperAdmin';
     if (lower == 'admin') return 'Admin';
@@ -55,16 +56,37 @@ class UserModel {
 
   factory UserModel.fromMap(Map<String, dynamic> map) {
     return UserModel(
-      userId: map['userId'] as String? ?? '',
-      name: map['name'] as String? ?? '',
-      email: map['email'] as String? ?? '',
-      phone: map['phone'] as String? ?? '',
-      role: _normalizeRole(map['role'] as String?),
-      shopId: map['shopId'] as String? ?? '',
+      userId: FirestoreParse.stringField(map['userId']),
+      name: FirestoreParse.stringField(map['name']),
+      email: FirestoreParse.stringField(map['email']),
+      phone: FirestoreParse.stringField(map['phone']),
+      role: _normalizeRole(FirestoreParse.stringField(map['role'])),
+      shopId: FirestoreParse.stringField(map['shopId']),
       status: _normalizeStatus(map['status']),
-      createdAt: map['createdAt'] is Timestamp
-          ? (map['createdAt'] as Timestamp).toDate()
-          : DateTime.now(),
+      createdAt: FirestoreParse.dateTimeField(map['createdAt']),
+    );
+  }
+
+  static UserModel? tryFromMap(Map<String, dynamic>? map) {
+    if (map == null) return null;
+    final user = UserModel.fromMap(map);
+    if (user.userId.isEmpty) return null;
+    return user;
+  }
+
+  static UserModel? tryFromDocument(DocumentSnapshot doc) {
+    return FirestoreParse.tryParse(
+      doc,
+      UserModel.fromMap,
+      validate: (u) => u.userId.isNotEmpty,
+    );
+  }
+
+  static UserModel? tryFromQueryDocument(QueryDocumentSnapshot doc) {
+    return FirestoreParse.tryParseQuery(
+      doc,
+      UserModel.fromMap,
+      validate: (u) => u.userId.isNotEmpty,
     );
   }
 

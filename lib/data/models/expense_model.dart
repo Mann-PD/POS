@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../core/firestore/firestore_parse.dart';
 
 class ExpenseModel {
   final String expenseId;
@@ -21,15 +22,28 @@ class ExpenseModel {
 
   factory ExpenseModel.fromMap(Map<String, dynamic> map) {
     return ExpenseModel(
-      expenseId: map['expenseId'] as String? ?? '',
-      shopId: map['shopId'] as String? ?? '',
-      amount: (map['amount'] as num?)?.toDouble() ?? 0,
-      description: map['description'] as String? ?? '',
-      category: map['category'] as String? ?? 'Other',
-      createdBy: map['createdBy'] as String? ?? '',
-      createdAt: map['createdAt'] is Timestamp
-          ? (map['createdAt'] as Timestamp).toDate()
-          : DateTime.now(),
+      expenseId: FirestoreParse.stringField(map['expenseId']),
+      shopId: FirestoreParse.stringField(map['shopId']),
+      amount: FirestoreParse.doubleField(map['amount']),
+      description: FirestoreParse.stringField(map['description']),
+      category: FirestoreParse.stringField(map['category'], fallback: 'Other'),
+      createdBy: FirestoreParse.stringField(map['createdBy']),
+      createdAt: FirestoreParse.dateTimeField(map['createdAt']),
+    );
+  }
+
+  static ExpenseModel? tryFromMap(Map<String, dynamic>? map) {
+    if (map == null) return null;
+    final expense = ExpenseModel.fromMap(map);
+    if (expense.expenseId.isEmpty && expense.shopId.isEmpty) return null;
+    return expense;
+  }
+
+  static ExpenseModel? tryFromQueryDocument(QueryDocumentSnapshot doc) {
+    return FirestoreParse.tryParseQuery(
+      doc,
+      ExpenseModel.fromMap,
+      validate: (e) => e.shopId.isNotEmpty,
     );
   }
 

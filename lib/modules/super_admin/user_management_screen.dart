@@ -1,17 +1,27 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../core/firestore/firestore_rule_safe_update.dart';
 import '../../data/models/user_model.dart';
+import '../../routing/guarded_navigator.dart';
+import '../../routing/screen_permission.dart';
 import 'create_admin_screen.dart';
 
 /// Super Admin only: list all users, set status, and create Admin users.
 class UserManagementScreen extends StatelessWidget {
   const UserManagementScreen({super.key});
 
-  Future<void> _updateStatus(BuildContext context, String userId, String newStatus) async {
+  Future<void> _updateStatus(
+    BuildContext context,
+    UserModel user,
+    String newStatus,
+  ) async {
     try {
-      await FirebaseFirestore.instance.collection('users').doc(userId).update({
-        'status': newStatus,
-      });
+      await FirebaseFirestore.instance.collection('users').doc(user.userId).update(
+            FirestoreRuleSafeUpdate.user(
+              user,
+              changes: {'status': newStatus},
+            ),
+          );
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Status set to $newStatus')),
@@ -34,11 +44,10 @@ class UserManagementScreen extends StatelessWidget {
         actions: [
           TextButton.icon(
             onPressed: () {
-              Navigator.push(
+              GuardedNavigator.push(
                 context,
-                MaterialPageRoute(
-                  builder: (context) => const CreateAdminScreen(),
-                ),
+                permission: ScreenPermission.createAdmin,
+                page: const CreateAdminScreen(),
               );
             },
             icon: const Icon(Icons.person_add),
@@ -72,7 +81,8 @@ class UserManagementScreen extends StatelessWidget {
             return const Center(child: Text('No users in the system.'));
           }
           final users = docs
-              .map((d) => UserModel.fromMap(d.data() as Map<String, dynamic>))
+              .map((d) => UserModel.tryFromQueryDocument(d))
+              .whereType<UserModel>()
               .toList();
           return ListView.builder(
             padding: const EdgeInsets.all(16),
@@ -105,7 +115,7 @@ class UserManagementScreen extends StatelessWidget {
                           PopupMenuButton<String>(
                             icon: const Icon(Icons.more_vert),
                             tooltip: 'Change status',
-                            onSelected: (value) => _updateStatus(context, user.userId, value),
+                            onSelected: (value) => _updateStatus(context, user, value),
                             itemBuilder: (context) => [
                               const PopupMenuItem(value: 'Active', child: Text('Set Active')),
                               const PopupMenuItem(value: 'Inactive', child: Text('Set Inactive')),

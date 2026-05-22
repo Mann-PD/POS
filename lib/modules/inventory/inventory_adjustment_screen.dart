@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 
 import '../../data/models/product_model.dart';
+import '../../widgets/firestore_paginated_list.dart';
 import '../../data/models/user_model.dart';
 
 /// Inventory Adjustment Screen
@@ -32,9 +33,8 @@ class _InventoryAdjustmentScreenState extends State<InventoryAdjustmentScreen> {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
-        if (mounted) {
-          Navigator.of(context).pop();
-        }
+        if (!context.mounted) return;
+        Navigator.of(context).pop();
         return;
       }
 
@@ -44,26 +44,32 @@ class _InventoryAdjustmentScreenState extends State<InventoryAdjustmentScreen> {
           .get();
 
       if (userDoc.exists) {
-        final userData =
-            UserModel.fromMap(userDoc.data() as Map<String, dynamic>);
+        final userData = UserModel.tryFromDocument(userDoc);
+        if (userData == null) {
+          if (!mounted) return;
+          setState(() => _isLoadingUser = false);
+          return;
+        }
+        if (!mounted) return;
         setState(() {
           _shopId = userData.shopId;
           _isLoadingUser = false;
         });
       } else {
+        if (!mounted) return;
         setState(() {
           _isLoadingUser = false;
         });
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading user data: $e')),
-        );
-      }
+      if (!mounted) return;
       setState(() {
         _isLoadingUser = false;
       });
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error loading user data: $e')),
+      );
     }
   }
 
@@ -209,7 +215,7 @@ class _InventoryAdjustmentScreenState extends State<InventoryAdjustmentScreen> {
       final callable = FirebaseFunctions.instance.httpsCallable('adjustStock');
       final adjustment = isIncrease ? amount : -amount;
 
-      await callable.call<Map<String, dynamic>>({
+      await callable.call({
         'productId': product.productId,
         'shopId': _shopId,
         'adjustment': adjustment,
@@ -297,137 +303,77 @@ class _InventoryAdjustmentScreenState extends State<InventoryAdjustmentScreen> {
             ),
           ),
           Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
+            child: FirestorePaginatedList<ProductModel>(
+              cacheKey: 'inventory_adjust_$_shopId',
+              queryBuilder: () => FirebaseFirestore.instance
                   .collection('products')
                   .where('shopId', isEqualTo: _shopId)
-                  .orderBy('name')
-                  .snapshots(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
-                if (snapshot.hasError) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.error_outline,
-                          size: 64,
-                          color: colorScheme.error,
-                        ),
-                        const SizedBox(height: 16),
-                        Text('Error loading products: ${snapshot.error}'),
-                      ],
-                    ),
-                  );
-                }
-
-                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.inventory_2_outlined,
-                          size: 64,
-                          color: colorScheme.outline,
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          'No products found',
-                          style: Theme.of(context).textTheme.titleLarge,
-                        ),
-                      ],
-                    ),
-                  );
-                }
-
-                final allProducts = snapshot.data!.docs
-                    .map(
-                      (doc) => ProductModel.fromMap(
-                        doc.data() as Map<String, dynamic>,
-                      ),
+                  .orderBy('name'),
+              parse: (data, _) => ProductModel.tryFromMap(data),
+              itemKey: (p) => p.productId,
+              filterItems: (items) {
+                if (_searchQuery.isEmpty) return items;
+                final q = _searchQuery.toLowerCase();
+                return items
+                    .where(
+                      (p) =>
+                          p.name.toLowerCase().contains(q) ||
+                          p.productId.toLowerCase().contains(q),
                     )
                     .toList();
-
-                List<ProductModel> filtered = allProducts;
-                if (_searchQuery.isNotEmpty) {
-                  final q = _searchQuery.toLowerCase();
-                  filtered = allProducts
-                      .where(
-                        (p) =>
-                            p.name.toLowerCase().contains(q) ||
-                            p.productId.toLowerCase().contains(q),
-                      )
-                      .toList();
-                }
-
-                if (filtered.isEmpty) {
-                  return Center(
-                    child: Text(
-                      'No products match your search',
-                      style: Theme.of(context).textTheme.bodyLarge,
-                    ),
-                  );
-                }
-
-                return ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: filtered.length,
-                  itemBuilder: (context, index) {
-                    final product = filtered[index];
-                    final isOutOfStock = product.stock <= 0;
-                    final isLowStock =
-                        product.stock > 0 && product.stock <= 10;
-
-                    Color stockColor;
-                    if (isOutOfStock) {
-                      stockColor = colorScheme.error;
-                    } else if (isLowStock) {
-                      stockColor = colorScheme.errorContainer;
-                    } else {
-                      stockColor = colorScheme.primary;
-                    }
-
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      child: ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor: stockColor.withValues(alpha: 0.1),
-                          child: Icon(
-                            Icons.inventory_2,
-                            color: stockColor,
-                          ),
-                        ),
-                        title: Text(product.name),
-                        subtitle: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const SizedBox(height: 4),
-                            Text(
-                              'Stock: ${product.stock.toStringAsFixed(2)} ${product.measurementType}',
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              'Price: ₹${product.price.toStringAsFixed(2)}',
-                            ),
-                          ],
-                        ),
-                        trailing: FilledButton(
-                          onPressed: () => _showAdjustmentDialog(product),
-                          child: const Text('Adjust'),
-                        ),
-                      ),
-                    );
-                  },
-                );
               },
+              emptyBuilder: (context) => Center(
+                child: Text(
+                  _searchQuery.isEmpty
+                      ? 'No products found'
+                      : 'No products match your search',
+                ),
+              ),
+              itemBuilder: (context, product) =>
+                  _buildAdjustmentTile(context, product, colorScheme),
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildAdjustmentTile(
+    BuildContext context,
+    ProductModel product,
+    ColorScheme colorScheme,
+  ) {
+    final isOutOfStock = product.stock <= 0;
+    final isLowStock = product.stock > 0 && product.stock <= 10;
+    final Color stockColor = isOutOfStock
+        ? colorScheme.error
+        : isLowStock
+            ? colorScheme.errorContainer
+            : colorScheme.primary;
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: stockColor.withValues(alpha: 0.1),
+          child: Icon(Icons.inventory_2, color: stockColor),
+        ),
+        title: Text(product.name),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 4),
+            Text(
+              'Stock: ${product.stock.toStringAsFixed(2)} ${product.measurementType}',
+            ),
+            const SizedBox(height: 2),
+            Text('Price: ₹${product.price.toStringAsFixed(2)}'),
+          ],
+        ),
+        trailing: FilledButton(
+          onPressed: () => _showAdjustmentDialog(product),
+          child: const Text('Adjust'),
+        ),
       ),
     );
   }

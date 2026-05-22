@@ -36,10 +36,7 @@ class CartFAB extends StatelessWidget {
                   color: colorScheme.error,
                   shape: BoxShape.circle,
                 ),
-                constraints: const BoxConstraints(
-                  minWidth: 20,
-                  minHeight: 20,
-                ),
+                constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
                 child: Text(
                   itemCount > 99 ? '99+' : itemCount.toString(),
                   style: const TextStyle(
@@ -59,17 +56,11 @@ class CartFAB extends StatelessWidget {
         children: [
           Text(
             '$itemCount ${itemCount == 1 ? 'item' : 'items'}',
-            style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-            ),
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
           ),
           Text(
             '₹${totalAmount.toStringAsFixed(2)}',
-            style: const TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-            ),
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
           ),
         ],
       ),

@@ -20,7 +20,7 @@ class _CreateShopScreenState extends State<CreateShopScreen> {
     super.dispose();
   }
 
-  Future<void> _createShop() async {
+  Future<void> _createShop(BuildContext pageContext) async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _submitting = true);
     try {
@@ -32,20 +32,22 @@ class _CreateShopScreenState extends State<CreateShopScreen> {
         'status': 'Active',
         'createdAt': FieldValue.serverTimestamp(),
       });
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
           const SnackBar(content: Text('Shop created'), backgroundColor: Colors.green),
         );
-        Navigator.of(context).pop();
+        Navigator.of(pageContext).pop();
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
           SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
         );
       }
     } finally {
-      if (mounted) setState(() => _submitting = false);
+      if (mounted) {
+        setState(() => _submitting = false);
+      }
     }
   }
 
@@ -70,7 +72,7 @@ class _CreateShopScreenState extends State<CreateShopScreen> {
               ),
               const SizedBox(height: 24),
               FilledButton(
-                onPressed: _submitting ? null : _createShop,
+                onPressed: _submitting ? null : () => _createShop(context),
                 child: _submitting
                     ? const SizedBox(
                         height: 24,

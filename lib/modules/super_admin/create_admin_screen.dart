@@ -26,43 +26,49 @@ class _CreateAdminScreenState extends State<CreateAdminScreen> {
   @override
   void initState() {
     super.initState();
-    _loadShops();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _loadShops(context);
+    });
   }
 
-  Future<void> _loadShops() async {
+  Future<void> _loadShops(BuildContext pageContext) async {
     try {
       final snap = await FirebaseFirestore.instance
           .collection('shops')
           .orderBy('name')
           .get();
       final shops = snap.docs
-          .map((d) => ShopModel.fromMap(d.data()))
+          .map((d) => ShopModel.tryFromQueryDocument(d))
+          .whereType<ShopModel>()
           .toList();
-      if (mounted) {
-        setState(() {
-          _shops = shops;
-          if (shops.isNotEmpty && _selectedShopId == null) {
-            _selectedShopId = shops.first.shopId;
-          }
-          _loading = false;
-        });
-      }
+      if (!mounted) return;
+      setState(() {
+        _shops = shops;
+        if (shops.isNotEmpty && _selectedShopId == null) {
+          _selectedShopId = shops.first.shopId;
+        }
+        _loading = false;
+      });
     } catch (e) {
-      if (mounted) {
-        setState(() => _loading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
           SnackBar(content: Text('Error loading shops: $e'), backgroundColor: Colors.red),
         );
       }
+      if (!mounted) return;
+      setState(() => _loading = false);
     }
   }
 
-  Future<void> _createAdmin() async {
+  Future<void> _createAdmin(BuildContext pageContext) async {
     if (!_formKey.currentState!.validate()) return;
     if (_selectedShopId == null || _selectedShopId!.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a shop'), backgroundColor: Colors.red),
-      );
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
+          const SnackBar(content: Text('Please select a shop'), backgroundColor: Colors.red),
+        );
+      }
       return;
     }
 
@@ -80,14 +86,14 @@ class _CreateAdminScreenState extends State<CreateAdminScreen> {
       });
 
       if (result.data != null && result.data['success'] == true) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
+        if (pageContext.mounted) {
+          ScaffoldMessenger.of(pageContext).showSnackBar(
             const SnackBar(
               content: Text('Admin created successfully. They can log in with the email and temporary password.'),
               backgroundColor: Colors.green,
             ),
           );
-          Navigator.of(context).pop();
+          Navigator.of(pageContext).pop();
         }
       }
     } on FirebaseFunctionsException catch (e) {
@@ -99,19 +105,21 @@ class _CreateAdminScreenState extends State<CreateAdminScreen> {
       } else if (e.code == 'invalid-argument') {
         msg = e.message ?? msg;
       }
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
           SnackBar(content: Text(msg), backgroundColor: Colors.red),
         );
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
           SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
         );
       }
     } finally {
-      if (mounted) setState(() => _submitting = false);
+      if (mounted) {
+        setState(() => _submitting = false);
+      }
     }
   }
 
@@ -209,7 +217,7 @@ class _CreateAdminScreenState extends State<CreateAdminScreen> {
               ),
               const SizedBox(height: 24),
               FilledButton(
-                onPressed: _submitting ? null : _createAdmin,
+                onPressed: _submitting ? null : () => _createAdmin(context),
                 child: _submitting
                     ? const SizedBox(
                         height: 24,

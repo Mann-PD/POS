@@ -1,7 +1,8 @@
 /// Application route names.
 ///
-/// Protected routes require a valid authenticated user whose role matches.
-/// The guard is enforced in [RouteGuard.onGenerateRoute].
+/// Top-level dashboards are protected by [RouteGuard.onGenerateRoute].
+/// Sub-screens must use [GuardedNavigator] and/or [PermissionGate] with
+/// [ScreenPermission] — see `lib/routing/screen_permission.dart`.
 class AppRoutes {
   AppRoutes._(); // Private constructor to prevent instantiation
 

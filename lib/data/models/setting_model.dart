@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../core/firestore/firestore_parse.dart';
 
 class SettingModel {
   final String settingId;
@@ -18,15 +19,32 @@ class SettingModel {
   });
 
   factory SettingModel.fromMap(Map<String, dynamic> map) {
+    final scope = FirestoreParse.stringField(map['scope'], fallback: 'shop');
+    final shopIdRaw = map['shopId'];
     return SettingModel(
-      settingId: map['settingId'] as String? ?? '',
-      scope: map['scope'] as String? ?? 'shop',
-      shopId: map['shopId'] as String?,
-      key: map['key'] as String? ?? '',
+      settingId: FirestoreParse.stringField(map['settingId']),
+      scope: scope,
+      shopId: shopIdRaw == null
+          ? null
+          : FirestoreParse.stringField(shopIdRaw),
+      key: FirestoreParse.stringField(map['key']),
       value: map['value'],
-      updatedAt: map['updatedAt'] is Timestamp
-          ? (map['updatedAt'] as Timestamp).toDate()
-          : DateTime.now(),
+      updatedAt: FirestoreParse.dateTimeField(map['updatedAt']),
+    );
+  }
+
+  static SettingModel? tryFromMap(Map<String, dynamic>? map) {
+    if (map == null) return null;
+    final setting = SettingModel.fromMap(map);
+    if (setting.key.isEmpty) return null;
+    return setting;
+  }
+
+  static SettingModel? tryFromQueryDocument(QueryDocumentSnapshot doc) {
+    return FirestoreParse.tryParseQuery(
+      doc,
+      SettingModel.fromMap,
+      validate: (s) => s.key.isNotEmpty,
     );
   }
 

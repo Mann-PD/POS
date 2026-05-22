@@ -1,6 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../core/firestore/firestore_pagination.dart';
+import '../../core/firestore/firestore_parse.dart';
+import '../../core/firestore/firestore_stream_cache.dart';
 import '../../data/models/order_model.dart';
 import '../../data/models/expense_model.dart';
+import '../../data/models/user_model.dart';
 
 /// Role-scoped read-only reports. Uses locked orders only; no data modification.
 class ReportsService {
@@ -26,10 +30,18 @@ class ReportsService {
     if (employeeId != null && employeeId.isNotEmpty) {
       q = q.where('employeeId', isEqualTo: employeeId);
     }
-    q = q.orderBy('createdAt', descending: true);
+    q = q
+        .orderBy('createdAt', descending: true)
+        .limit(FirestorePageSize.reportStreamCap);
 
-    return q.snapshots().map((snap) =>
-        snap.docs.map((d) => OrderModel.fromMap(d.data())).toList());
+    final cacheKey =
+        'locked_orders|shop=${shopId ?? ''}|emp=${employeeId ?? ''}';
+    return FirestoreStreamCache.instance.stream(cacheKey, () {
+      return q.snapshots().map(
+        (snap) =>
+            FirestoreParse.parseQueryDocs(snap.docs, OrderModel.tryFromMap),
+      );
+    });
   }
 
   /// One-time fetch for date range (for period reports).
@@ -55,51 +67,176 @@ class ReportsService {
     q = q.orderBy('createdAt', descending: true);
 
     final snap = await q.get();
-    return snap.docs.map((d) => OrderModel.fromMap(d.data())).toList();
+    return FirestoreParse.parseQueryDocs(snap.docs, OrderModel.tryFromMap);
+  }
+
+  /// Paginated locked orders (reports / global summaries).
+  Future<FirestorePage<OrderModel>> fetchLockedOrdersPage({
+    String? shopId,
+    String? employeeId,
+    DocumentSnapshot<Map<String, dynamic>>? startAfter,
+    int pageSize = FirestorePageSize.history,
+  }) {
+    Query<Map<String, dynamic>> q = _db
+        .collection('orders')
+        .where('orderStatus', isEqualTo: _ordersLocked);
+    if (shopId != null && shopId.isNotEmpty) {
+      q = q.where('shopId', isEqualTo: shopId);
+    }
+    if (employeeId != null && employeeId.isNotEmpty) {
+      q = q.where('employeeId', isEqualTo: employeeId);
+    }
+    q = q.orderBy('createdAt', descending: true);
+    return fetchFirestorePage(
+      query: q,
+      parse: (data, _) => OrderModel.tryFromMap(data),
+      pageSize: pageSize,
+      startAfter: startAfter,
+    );
+  }
+
+  /// Locked orders in range with optional [maxDocs] cap (batched report reads).
+  Future<List<OrderModel>> getLockedOrdersInRangeBatched({
+    required DateTime start,
+    required DateTime end,
+    String? shopId,
+    String? employeeId,
+    int maxDocs = 2000,
+  }) async {
+    final all = <OrderModel>[];
+    DocumentSnapshot<Map<String, dynamic>>? cursor;
+    const batchSize = 200;
+    while (all.length < maxDocs) {
+      Query<Map<String, dynamic>> q = _db
+          .collection('orders')
+          .where('orderStatus', isEqualTo: _ordersLocked)
+          .where('createdAt',
+              isGreaterThanOrEqualTo: Timestamp.fromDate(start))
+          .where('createdAt', isLessThanOrEqualTo: Timestamp.fromDate(end));
+      if (shopId != null && shopId.isNotEmpty) {
+        q = q.where('shopId', isEqualTo: shopId);
+      }
+      if (employeeId != null && employeeId.isNotEmpty) {
+        q = q.where('employeeId', isEqualTo: employeeId);
+      }
+      q = q.orderBy('createdAt', descending: true);
+      final page = await fetchFirestorePage(
+        query: q,
+        parse: (data, _) => OrderModel.tryFromMap(data),
+        pageSize: batchSize,
+        startAfter: cursor,
+      );
+      all.addAll(page.items);
+      if (!page.hasMore || page.lastDocument == null) break;
+      cursor = page.lastDocument;
+    }
+    return all.length > maxDocs ? all.sublist(0, maxDocs) : all;
   }
 
   /// Stream all orders for order history (pending + locked + cancelled).
+  /// Paginated order history for a shop (all statuses).
+  Future<FirestorePage<OrderModel>> fetchOrdersForShopPage({
+    required String shopId,
+    DocumentSnapshot<Map<String, dynamic>>? startAfter,
+    int pageSize = FirestorePageSize.history,
+  }) {
+    return fetchFirestorePage(
+      query: _db
+          .collection('orders')
+          .where('shopId', isEqualTo: shopId)
+          .orderBy('createdAt', descending: true),
+      parse: (data, _) => OrderModel.tryFromMap(data),
+      pageSize: pageSize,
+      startAfter: startAfter,
+    );
+  }
+
+  /// Paginated order history for SuperAdmin (cross-shop).
+  Future<FirestorePage<OrderModel>> fetchAllOrdersPage({
+    DocumentSnapshot<Map<String, dynamic>>? startAfter,
+    int pageSize = FirestorePageSize.history,
+  }) {
+    return fetchFirestorePage(
+      query: _db.collection('orders').orderBy('createdAt', descending: true),
+      parse: (data, _) => OrderModel.tryFromMap(data),
+      pageSize: pageSize,
+      startAfter: startAfter,
+    );
+  }
+
+  @Deprecated('Use fetchOrdersForShopPage / FirestorePagedList for order history')
   Stream<List<OrderModel>> streamAllOrdersForShop({
     required String shopId,
   }) {
-    return _db
-        .collection('orders')
-        .where('shopId', isEqualTo: shopId)
-        .orderBy('createdAt', descending: true)
-        .snapshots()
-        .map((snap) =>
-            snap.docs.map((d) => OrderModel.fromMap(d.data())).toList());
+    final cacheKey = 'all_orders_shop|$shopId';
+    return FirestoreStreamCache.instance.stream(cacheKey, () {
+      return _db
+          .collection('orders')
+          .where('shopId', isEqualTo: shopId)
+          .orderBy('createdAt', descending: true)
+          .limit(FirestorePageSize.reportStreamCap)
+          .snapshots()
+          .map(
+            (snap) => FirestoreParse.parseQueryDocs(
+              snap.docs,
+              OrderModel.tryFromMap,
+            ),
+          );
+    });
   }
 
   /// Stream all orders for SuperAdmin (cross-shop). No shopId filter.
+  @Deprecated('Use fetchAllOrdersPage / FirestorePagedList for order history')
   Stream<List<OrderModel>> streamAllOrdersSuperAdmin() {
-    return _db
-        .collection('orders')
-        .orderBy('createdAt', descending: true)
-        .snapshots()
-        .map((snap) =>
-            snap.docs.map((d) => OrderModel.fromMap(d.data())).toList());
+    const cacheKey = 'all_orders_superadmin';
+    return FirestoreStreamCache.instance.stream(cacheKey, () {
+      return _db
+          .collection('orders')
+          .orderBy('createdAt', descending: true)
+          .limit(FirestorePageSize.reportStreamCap)
+          .snapshots()
+          .map(
+            (snap) => FirestoreParse.parseQueryDocs(
+              snap.docs,
+              OrderModel.tryFromMap,
+            ),
+          );
+    });
   }
 
   /// Stream expenses for a shop. Pass empty shopId for SuperAdmin (all) - need to fetch all.
   Stream<List<ExpenseModel>> streamExpenses({String? shopId}) {
     if (shopId != null && shopId.isNotEmpty) {
+      final cacheKey = 'expenses_shop|$shopId';
+      return FirestoreStreamCache.instance.stream(cacheKey, () {
+        return _db
+            .collection('expenses')
+            .where('shopId', isEqualTo: shopId)
+            .orderBy('createdAt', descending: true)
+            .limit(FirestorePageSize.reportStreamCap)
+            .snapshots()
+            .map(
+              (snap) => FirestoreParse.parseQueryDocs(
+                snap.docs,
+                ExpenseModel.tryFromMap,
+              ),
+            );
+      });
+    }
+    const cacheKey = 'expenses_all';
+    return FirestoreStreamCache.instance.stream(cacheKey, () {
       return _db
           .collection('expenses')
-          .where('shopId', isEqualTo: shopId)
           .orderBy('createdAt', descending: true)
+          .limit(FirestorePageSize.reportStreamCap)
           .snapshots()
-          .map((snap) => snap.docs
-              .map((d) => ExpenseModel.fromMap(d.data()))
-              .toList());
-    }
-    // SuperAdmin: all expenses (no shopId filter)
-    return _db
-        .collection('expenses')
-        .orderBy('createdAt', descending: true)
-        .snapshots()
-        .map((snap) =>
-            snap.docs.map((d) => ExpenseModel.fromMap(d.data())).toList());
+          .map(
+            (snap) => FirestoreParse.parseQueryDocs(
+              snap.docs,
+              ExpenseModel.tryFromMap,
+            ),
+          );
+    });
   }
 
   /// Fetch order items for an order (for product-wise breakdown).
@@ -108,7 +245,10 @@ class ReportsService {
         .collection('order_items')
         .where('orderId', isEqualTo: orderId)
         .get();
-    return snap.docs.map((d) => d.data()).toList();
+    return snap.docs
+        .map((d) => FirestoreParse.queryDocumentData(d))
+        .whereType<Map<String, dynamic>>()
+        .toList();
   }
 
   /// Fetch expenses in date range for summary.
@@ -129,7 +269,26 @@ class ReportsService {
     q = q.orderBy('createdAt', descending: true);
 
     final snap = await q.get();
-    return snap.docs.map((d) => ExpenseModel.fromMap(d.data())).toList();
+    return FirestoreParse.parseQueryDocs(snap.docs, ExpenseModel.tryFromMap);
+  }
+
+  /// Paginated expenses for a shop.
+  Future<FirestorePage<ExpenseModel>> fetchExpensesPage({
+    String? shopId,
+    DocumentSnapshot<Map<String, dynamic>>? startAfter,
+    int pageSize = FirestorePageSize.standard,
+  }) {
+    Query<Map<String, dynamic>> q = _db.collection('expenses');
+    if (shopId != null && shopId.isNotEmpty) {
+      q = q.where('shopId', isEqualTo: shopId);
+    }
+    q = q.orderBy('createdAt', descending: true);
+    return fetchFirestorePage(
+      query: q,
+      parse: (data, _) => ExpenseModel.tryFromMap(data),
+      pageSize: pageSize,
+      startAfter: startAfter,
+    );
   }
 
   /// Today's sales summary for admin dashboard (locked orders only).
@@ -161,6 +320,7 @@ class ReportsService {
         .collection('products')
         .where('shopId', isEqualTo: shopId)
         .where('status', isEqualTo: 'Active')
+        .limit(FirestorePageSize.posCatalogCap)
         .get();
     int count = 0;
     for (final doc in snap.docs) {
@@ -183,7 +343,7 @@ class ReportsService {
     }
     q = q.orderBy('createdAt', descending: true).limit(limit);
     final snap = await q.get();
-    return snap.docs.map((d) => OrderModel.fromMap(d.data())).toList();
+    return FirestoreParse.parseQueryDocs(snap.docs, OrderModel.tryFromMap);
   }
 
   static bool isPending(String orderStatus) =>
@@ -200,7 +360,7 @@ class ReportsService {
     required DateTime end,
     String? shopId,
   }) async {
-    final orders = await getLockedOrdersInRange(
+    final orders = await getLockedOrdersInRangeBatched(
       start: start,
       end: end,
       shopId: shopId,
@@ -245,7 +405,7 @@ class ReportsService {
     required DateTime end,
     String? shopId,
   }) async {
-    final orders = await getLockedOrdersInRange(
+    final orders = await getLockedOrdersInRangeBatched(
       start: start,
       end: end,
       shopId: shopId,
@@ -286,8 +446,9 @@ class ReportsService {
     // Resolve product names
     for (final pid in map.keys.toList()) {
       final doc = await _db.collection('products').doc(pid).get();
-      final name = doc.exists && doc.data() != null
-          ? (doc.data()!['name'] as String? ?? pid)
+      final productData = FirestoreParse.documentData(doc);
+      final name = productData != null
+          ? FirestoreParse.stringField(productData['name'], fallback: pid)
           : pid;
       final existing = map[pid]!;
       map[pid] = existing.copyWith(name: name);
@@ -305,7 +466,7 @@ class ReportsService {
     required DateTime end,
     String? shopId,
   }) async {
-    final orders = await getLockedOrdersInRange(
+    final orders = await getLockedOrdersInRangeBatched(
       start: start,
       end: end,
       shopId: shopId,
@@ -335,9 +496,11 @@ class ReportsService {
       if (name.isEmpty) {
         final userDoc =
             await _db.collection('users').doc(empId).get();
-        if (userDoc.exists && userDoc.data() != null) {
-          name = userDoc.data()!['name'] as String? ??
-              empId.substring(0, empId.length > 8 ? 8 : empId.length);
+        final u = UserModel.tryFromDocument(userDoc);
+        if (u != null && u.name.isNotEmpty) {
+          name = u.name;
+        } else if (userDoc.exists) {
+          name = empId.substring(0, empId.length > 8 ? 8 : empId.length);
         } else {
           name = empId.substring(0, empId.length > 8 ? 8 : empId.length);
         }

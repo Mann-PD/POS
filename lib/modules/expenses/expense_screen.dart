@@ -3,8 +3,11 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:get/get.dart';
 import '../../data/models/expense_model.dart';
+import '../../widgets/firestore_paginated_list.dart';
 import '../../data/models/user_model.dart';
 import '../admin/controllers/expense_ui_controller.dart';
+import '../../routing/guarded_navigator.dart';
+import '../../routing/screen_permission.dart';
 import 'expense_form_screen.dart';
 
 /// Expense Management Screen - Admin view of all expenses
@@ -31,9 +34,8 @@ class _ExpenseScreenState extends State<ExpenseScreen> {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
-        if (mounted) {
-          Navigator.of(context).pop();
-        }
+        if (!context.mounted) return;
+        Navigator.of(context).pop();
         return;
       }
 
@@ -43,9 +45,9 @@ class _ExpenseScreenState extends State<ExpenseScreen> {
           .get();
 
       if (userDoc.exists) {
-        final userData = UserModel.fromMap(
-          userDoc.data() as Map<String, dynamic>,
-        );
+        final userData = UserModel.tryFromDocument(userDoc);
+        if (userData == null) return;
+        if (!mounted) return;
         setState(() {
           _shopId = userData.shopId;
           _isLoading = false;
@@ -54,15 +56,15 @@ class _ExpenseScreenState extends State<ExpenseScreen> {
         _uiController.setLoading(false);
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading user data: $e')),
-        );
-      }
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
       });
       _uiController.setLoading(false);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error loading user data: $e')),
+      );
     }
   }
 
@@ -82,11 +84,10 @@ class _ExpenseScreenState extends State<ExpenseScreen> {
           IconButton(
             icon: const Icon(Icons.add),
             onPressed: () {
-              Navigator.push(
+              GuardedNavigator.push(
                 context,
-                MaterialPageRoute(
-                  builder: (context) => const ExpenseFormScreen(),
-                ),
+                permission: ScreenPermission.expenseForm,
+                page: const ExpenseFormScreen(),
               );
             },
             tooltip: 'Add Expense',
@@ -119,174 +120,41 @@ class _ExpenseScreenState extends State<ExpenseScreen> {
             ),
           ),
 
-          // Expenses list with summary
           Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('expenses')
-                  .where('shopId', isEqualTo: _shopId)
-                  .orderBy('createdAt', descending: true)
-                  .snapshots(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
-                if (snapshot.hasError) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.error_outline,
-                          size: 64,
-                          color: Theme.of(context).colorScheme.error,
-                        ),
-                        const SizedBox(height: 16),
-                        Text('Error loading expenses: ${snapshot.error}'),
-                      ],
-                    ),
-                  );
-                }
-
-                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.account_balance_wallet_outlined,
-                          size: 64,
-                          color: Theme.of(context).colorScheme.outline,
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          'No expenses found',
-                          style: Theme.of(context).textTheme.titleLarge,
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Tap + to add your first expense',
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                color: Theme.of(context).colorScheme.outline,
-                              ),
-                        ),
-                      ],
-                    ),
-                  );
-                }
-
-                final allExpenses = snapshot.data!.docs
-                    .map((doc) => ExpenseModel.fromMap(
-                          doc.data() as Map<String, dynamic>,
-                        ))
-                    .toList();
-
-                // Calculate total expenses
-                final totalExpenses = allExpenses.fold<double>(
-                  0.0,
-                  (sum, expense) => sum + expense.amount,
-                );
-
-                return Obx(() {
-                  var filteredExpenses = allExpenses;
-
-                  // Filter by search query
-                  if (_uiController.searchQuery.value.isNotEmpty) {
-                    filteredExpenses = filteredExpenses
-                        .where((expense) => expense.description
-                            .toLowerCase()
-                            .contains(_uiController.searchQuery.value.toLowerCase()))
+            child: Obx(
+              () => FirestorePaginatedList<ExpenseModel>(
+                cacheKey: 'expenses_legacy_$_shopId',
+                queryBuilder: () => FirebaseFirestore.instance
+                    .collection('expenses')
+                    .where('shopId', isEqualTo: _shopId)
+                    .orderBy('createdAt', descending: true),
+                parse: (data, _) => ExpenseModel.tryFromMap(data),
+                itemKey: (e) => e.expenseId,
+                filterItems: (items) {
+                  var filtered = items;
+                  final q = _uiController.searchQuery.value.trim().toLowerCase();
+                  if (q.isNotEmpty) {
+                    filtered = filtered
+                        .where((e) => e.description.toLowerCase().contains(q))
                         .toList();
                   }
-
-                  // Filter by date if selected
-                  if (_uiController.selectedDate.value != null) {
-                    final selectedDate = _uiController.selectedDate.value!;
-                    filteredExpenses = filteredExpenses.where((expense) {
-                      final expenseDate = expense.createdAt;
-                      return expenseDate.year == selectedDate.year &&
-                          expenseDate.month == selectedDate.month &&
-                          expenseDate.day == selectedDate.day;
+                  final selected = _uiController.selectedDate.value;
+                  if (selected != null) {
+                    filtered = filtered.where((e) {
+                      final d = e.createdAt;
+                      return d.year == selected.year &&
+                          d.month == selected.month &&
+                          d.day == selected.day;
                     }).toList();
                   }
-
-                  return Column(
-                    children: [
-                      // Total expenses card
-                      Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Card(
-                          color: Theme.of(context).colorScheme.primaryContainer,
-                          child: Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      'Total Expenses',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodyMedium
-                                          ?.copyWith(
-                                            color: Theme.of(context)
-                                                .colorScheme
-                                                .onPrimaryContainer,
-                                          ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      '₹${totalExpenses.toStringAsFixed(2)}',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .headlineMedium
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.bold,
-                                            color: Theme.of(context)
-                                                .colorScheme
-                                                .onPrimaryContainer,
-                                          ),
-                                    ),
-                                  ],
-                                ),
-                                Icon(
-                                  Icons.account_balance_wallet,
-                                  size: 48,
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .onPrimaryContainer,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-
-                      // Expenses list
-                      Expanded(
-                        child: filteredExpenses.isEmpty
-                            ? Center(
-                                child: Text(
-                                  'No expenses match your filters',
-                                  style: Theme.of(context).textTheme.bodyLarge,
-                                ),
-                              )
-                            : ListView.builder(
-                                padding: const EdgeInsets.all(16),
-                                itemCount: filteredExpenses.length,
-                                itemBuilder: (context, index) {
-                                  final expense = filteredExpenses[index];
-                                  return _buildExpenseCard(context, expense);
-                                },
-                              ),
-                      ),
-                    ],
-                  );
-                });
-              },
+                  return filtered;
+                },
+                emptyBuilder: (context) => const Center(
+                  child: Text('No expenses match your filters'),
+                ),
+                itemBuilder: (context, expense) =>
+                    _buildExpenseCard(context, expense),
+              ),
             ),
           ),
         ],
@@ -325,11 +193,10 @@ class _ExpenseScreenState extends State<ExpenseScreen> {
               ),
         ),
         onTap: () {
-          Navigator.push(
+          GuardedNavigator.push(
             context,
-            MaterialPageRoute(
-              builder: (context) => ExpenseFormScreen(expense: expense),
-            ),
+            permission: ScreenPermission.expenseForm,
+            page: ExpenseFormScreen(expense: expense),
           );
         },
       ),

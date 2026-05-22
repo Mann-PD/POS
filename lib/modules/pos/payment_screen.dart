@@ -5,6 +5,9 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:get/get.dart';
 import 'controllers/cart_controller.dart';
 import 'receipt_screen.dart';
+import '../../routing/guarded_navigator.dart';
+import '../../routing/permission_gate.dart';
+import '../../routing/screen_permission.dart';
 import '../../data/models/user_model.dart';
 
 /// Payment Selection Screen - Select payment method and complete order
@@ -31,15 +34,18 @@ class _PaymentScreenState extends State<PaymentScreen> {
   @override
   void initState() {
     super.initState();
-    _loadUserData();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _loadUserData(context);
+    });
   }
 
-  Future<void> _loadUserData() async {
+  Future<void> _loadUserData(BuildContext pageContext) async {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
-        if (mounted) {
-          Navigator.of(context).pushReplacementNamed('/login');
+        if (pageContext.mounted) {
+          Navigator.of(pageContext).pushReplacementNamed('/login');
         }
         return;
       }
@@ -50,41 +56,45 @@ class _PaymentScreenState extends State<PaymentScreen> {
           .get();
 
       if (userDoc.exists) {
-        final userData = UserModel.fromMap(
-          userDoc.data() as Map<String, dynamic>,
-        );
+        final userData = UserModel.tryFromDocument(userDoc);
+        if (userData == null) return;
+        if (!mounted) return;
         setState(() {
           _shopId = userData.shopId;
           _userId = userData.userId;
         });
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
           SnackBar(content: Text('Error loading user data: $e')),
         );
       }
     }
   }
 
-  Future<void> _confirmOrder() async {
+  Future<void> _confirmOrder(BuildContext pageContext) async {
     if (_selectedPaymentMethod == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please select a payment method'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
+          const SnackBar(
+            content: Text('Please select a payment method'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
       return;
     }
 
     if (_shopId == null || _userId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Unable to process order. Please try again.'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
+          const SnackBar(
+            content: Text('Unable to process order. Please try again.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
       return;
     }
 
@@ -96,17 +106,19 @@ class _PaymentScreenState extends State<PaymentScreen> {
       final cartController = Get.find<CartController>();
 
       if (cartController.isEmpty) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
+        if (pageContext.mounted) {
+          ScaffoldMessenger.of(pageContext).showSnackBar(
             const SnackBar(
               content: Text('Cart is empty'),
               backgroundColor: Colors.red,
             ),
           );
         }
-        setState(() {
-          _isProcessing = false;
-        });
+        if (mounted) {
+          setState(() {
+            _isProcessing = false;
+          });
+        }
         return;
       }
 
@@ -143,20 +155,20 @@ class _PaymentScreenState extends State<PaymentScreen> {
         // Step 4: Cloud Function returns the newly-created orderId
         final orderId = result.data['orderId'] as String;
 
-        if (mounted) {
+        if (pageContext.mounted) {
           // Clear cart after order is locked server-side
           cartController.clear();
 
           // Step 5: Navigate to ReceiptScreen using the returned orderId
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(
-              builder: (context) => ReceiptScreen(
-                orderId: orderId,
-                customerName: widget.customerName,
-                customerMobile: widget.customerMobile,
-                totalAmount: totalAmount,
-                paymentMethod: _selectedPaymentMethod!,
-              ),
+          GuardedNavigator.pushReplacement(
+            pageContext,
+            permission: ScreenPermission.receipt,
+            page: ReceiptScreen(
+              orderId: orderId,
+              customerName: widget.customerName,
+              customerMobile: widget.customerMobile,
+              totalAmount: totalAmount,
+              paymentMethod: _selectedPaymentMethod!,
             ),
           );
         }
@@ -164,8 +176,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
         throw Exception(result.data['error'] ?? 'Failed to confirm order');
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
           SnackBar(
             content: Text('Error processing order: $e'),
             backgroundColor: Colors.red,
@@ -212,6 +224,13 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
   @override
   Widget build(BuildContext context) {
+    return PermissionGate(
+      permission: ScreenPermission.payment,
+      child: _buildPayment(context),
+    );
+  }
+
+  Widget _buildPayment(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
@@ -351,7 +370,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
                   SizedBox(
                     width: double.infinity,
                     child: FilledButton(
-                      onPressed: _isProcessing ? null : _confirmOrder,
+                      onPressed: _isProcessing ? null : () => _confirmOrder(context),
                       style: FilledButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 16),
                         shape: RoundedRectangleBorder(

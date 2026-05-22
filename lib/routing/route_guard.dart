@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../core/observability/app_logger.dart';
 import '../data/models/user_model.dart';
 import '../modules/authentication/login_screen.dart';
 import '../modules/pos/pos_home_screen.dart';
@@ -7,7 +8,10 @@ import '../modules/admin/admin_dashboard.dart';
 import '../modules/super_admin/super_admin_dashboard.dart';
 import '../modules/reports/viewer_reports_dashboard.dart';
 import 'app_routes.dart';
+import 'auth_scope.dart';
+import 'permission_gate.dart';
 import 'role_based_router.dart';
+import 'screen_permission.dart';
 
 /// Route guard enforced on every named navigation.
 ///
@@ -39,63 +43,83 @@ class RouteGuard {
 
     // 1. Firebase Auth must have a current user.
     if (FirebaseAuth.instance.currentUser == null) {
-      debugPrint('RouteGuard: no authenticated user → redirect to login '
-          '(attempted: $routeName)');
+      AppLogger.debug(
+        'No authenticated user → redirect to login (attempted: $routeName)',
+        tag: 'RouteGuard',
+      );
       return _redirectToLogin(settings);
     }
 
     // 2. A UserModel must have been passed as arguments by the caller
-    //    (AuthWrapper passes it via pushReplacementNamed(..., arguments: userData)).
+    //    (AuthWrapper / LoginScreen pass it via pushReplacementNamed(..., arguments: user)).
     final args = settings.arguments;
-    if (args == null) {
-      debugPrint('RouteGuard: arguments missing temporarily, allowing navigation');
-      // Allow navigation to proceed — AuthWrapper will handle correct routing
-    } else if (args is! UserModel) {
-      debugPrint('RouteGuard: invalid arguments type → redirect to login');
+    if (args == null || args is! UserModel) {
+      AppLogger.debug(
+        'Missing or invalid UserModel arguments → redirect to login '
+        '(attempted: $routeName)',
+        tag: 'RouteGuard',
+      );
       return _redirectToLogin(settings);
     }
 
-    final UserModel? user = args is UserModel ? args : null;
+    final UserModel user = args;
 
-    if (user == null) {
-      // Temporary fallback: allow route (AuthWrapper ensures correct routing)
-      debugPrint('RouteGuard: user null fallback, skipping role check (Route: $routeName)');
-      final Widget page = _pageForRoute(
-        routeName,
-        UserModel(
-          userId: 'temp',
-          name: 'temp',
-          email: 'temp',
-          phone: 'temp',
-          role: 'temp',
-          shopId: 'temp',
-          status: 'temp',
-          createdAt: DateTime.now(),
-        ),
-      );
-      return _buildRoute(settings, page);
-    }
-
-    debugPrint('RouteGuard: validating route "$routeName" for role "${user.role}"');
+    AppLogger.debug(
+      'Validating route "$routeName" for role "${user.role}"',
+      tag: 'RouteGuard',
+    );
     final String role = user.role;
 
     // 3. Role must be valid.
     if (!RoleBasedRouter.isValidRole(role)) {
-      debugPrint('RouteGuard: unrecognised role "$role" → redirect to login');
+      AppLogger.warning(
+        'Unrecognised role "$role" → redirect to login',
+        tag: 'RouteGuard',
+      );
       return _redirectToLogin(settings);
     }
 
     // 4. Role must be permitted on this specific route.
     final allowed = RoleBasedRouter.allowedRoles(routeName);
     if (allowed.isEmpty || !allowed.contains(role)) {
-      debugPrint('RouteGuard: role "$role" not allowed on "$routeName" '
-          '(allowed: $allowed) → redirect to login');
+      AppLogger.warning(
+        'Role "$role" not allowed on "$routeName" (allowed: $allowed) → login',
+        tag: 'RouteGuard',
+      );
       return _redirectToLogin(settings);
     }
 
     // ── All checks passed — build the requested page ──────────────────────
     final Widget page = _pageForRoute(routeName, user);
-    return _buildRoute(settings, page);
+    return _buildRoute(
+      settings,
+      AuthScope(
+        user: user,
+        child: PermissionGate(
+          permission: _permissionForRoute(routeName),
+          child: page,
+        ),
+      ),
+    );
+  }
+
+  static ScreenPermission _permissionForRoute(String route) {
+    switch (route) {
+      case AppRoutes.employee:
+      case AppRoutes.employeeDashboard:
+        return ScreenPermission.posHome;
+      case AppRoutes.admin:
+      case AppRoutes.adminDashboard:
+        return ScreenPermission.adminDashboard;
+      case AppRoutes.superAdmin:
+      case AppRoutes.superAdminDashboard:
+        return ScreenPermission.superAdminDashboard;
+      case AppRoutes.viewer:
+      case AppRoutes.viewerDashboard:
+        return ScreenPermission.reportsDashboard;
+      default:
+        return ScreenPermission.public;
+    }
   }
 
   // ── Private helpers ───────────────────────────────────────────────────────
@@ -121,7 +145,7 @@ class RouteGuard {
       default:
         // Should never reach here after the allowed-roles check, but
         // fail safe: send to login rather than crash.
-        debugPrint('RouteGuard: unknown route "$route" → login');
+        AppLogger.warning('Unknown route "$route" → login', tag: 'RouteGuard');
         return const LoginScreen();
     }
   }

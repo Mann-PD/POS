@@ -2,9 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../../data/models/user_model.dart';
 import 'package:get/get.dart';
 import 'controllers/cart_controller.dart';
 import 'payment_screen.dart';
+import '../../routing/guarded_navigator.dart';
+import '../../routing/permission_gate.dart';
+import '../../routing/screen_permission.dart';
 
 /// Customer Details Screen - MANDATORY before checkout
 class CustomerScreen extends StatefulWidget {
@@ -19,7 +23,7 @@ class _CustomerScreenState extends State<CustomerScreen> {
   final _nameController = TextEditingController();
   final _mobileController = TextEditingController();
   bool _isLoading = false;
-  String? _shopId;
+
 
   @override
   void initState() {
@@ -37,12 +41,7 @@ class _CustomerScreenState extends State<CustomerScreen> {
           .doc(user.uid)
           .get();
 
-      if (userDoc.exists) {
-        final userData = userDoc.data() as Map<String, dynamic>;
-        setState(() {
-          _shopId = userData['shopId'] as String?;
-        });
-      }
+      UserModel.tryFromDocument(userDoc);
     } catch (e) {
       // Handle error silently
     }
@@ -67,14 +66,14 @@ class _CustomerScreenState extends State<CustomerScreen> {
     try {
       final cartController = Get.find<CartController>();
       if (cartController.isEmpty) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Cart is empty'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Cart is empty'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        if (!mounted) return;
         setState(() {
           _isLoading = false;
         });
@@ -83,25 +82,23 @@ class _CustomerScreenState extends State<CustomerScreen> {
 
       // Customer details will be handled in payment screen
 
-      if (mounted) {
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (context) => PaymentScreen(
-              customerName: _nameController.text.trim(),
-              customerMobile: _mobileController.text.trim(),
-            ),
-          ),
-        );
-      }
+      if (!context.mounted) return;
+      GuardedNavigator.push(
+        context,
+        permission: ScreenPermission.payment,
+        page: PaymentScreen(
+          customerName: _nameController.text.trim(),
+          customerMobile: _mobileController.text.trim(),
+        ),
+      );
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
     } finally {
       if (mounted) {
         setState(() {
@@ -139,6 +136,13 @@ class _CustomerScreenState extends State<CustomerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    return PermissionGate(
+      permission: ScreenPermission.customerSelect,
+      child: _buildCustomerForm(context),
+    );
+  }
+
+  Widget _buildCustomerForm(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 

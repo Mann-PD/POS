@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../../../core/firestore/firestore_rule_safe_update.dart';
 import '../../../data/models/category_model.dart';
 
 /// Category Form Screen - Create or edit a category.
@@ -40,7 +41,7 @@ class _CategoryFormScreenState extends State<CategoryFormScreen> {
     super.dispose();
   }
 
-  Future<void> _save() async {
+  Future<void> _save(BuildContext pageContext) async {
     if (!_formKey.currentState!.validate()) {
       return;
     }
@@ -52,12 +53,15 @@ class _CategoryFormScreenState extends State<CategoryFormScreen> {
           .collection('categories');
 
       if (_isEditing) {
-        await categories
-            .doc(widget.category!.categoryId)
-            .update({
-          'name': name,
-          'status': _status,
-        });
+        await categories.doc(widget.category!.categoryId).update(
+              FirestoreRuleSafeUpdate.category(
+                widget.category!,
+                changes: {
+                  'name': name,
+                  'status': _status,
+                },
+              ),
+            );
       } else {
         final docRef = categories.doc();
         await docRef.set({
@@ -69,21 +73,19 @@ class _CategoryFormScreenState extends State<CategoryFormScreen> {
         });
       }
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
           SnackBar(
             content: Text(
-              _isEditing
-                  ? 'Category updated'
-                  : 'Category created',
+              _isEditing ? 'Category updated' : 'Category created',
             ),
           ),
         );
-        Navigator.of(context).pop();
+        Navigator.of(pageContext).pop();
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
           SnackBar(
             content: Text('Error saving category: $e'),
             backgroundColor: Colors.red,
@@ -106,7 +108,7 @@ class _CategoryFormScreenState extends State<CategoryFormScreen> {
         title: Text(_isEditing ? 'Edit Category' : 'Add Category'),
         actions: [
           TextButton(
-            onPressed: _isSaving ? null : _save,
+            onPressed: _isSaving ? null : () => _save(context),
             child: const Text('Save'),
           ),
         ],
@@ -161,7 +163,7 @@ class _CategoryFormScreenState extends State<CategoryFormScreen> {
               ),
               const SizedBox(height: 24),
               FilledButton(
-                onPressed: _isSaving ? null : _save,
+                onPressed: _isSaving ? null : () => _save(context),
                 child: _isSaving
                     ? const SizedBox(
                         height: 20,

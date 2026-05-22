@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/observability/error_ui.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 
@@ -76,18 +77,17 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
           'action': 'PASSWORD_RESET',
           'shopId': '', // User may not be authenticated when requesting reset
         });
-      } catch (_) {
-        // Non-blocking
+      } catch (e, st) {
+        reportCatch(e, stackTrace: st, tag: 'ForgotPassword.audit');
       }
 
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-          _isSuccess = true;
-          _successMessage =
-              'Password reset email sent! Please check your inbox and follow the instructions to reset your password.';
-        });
-      }
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _isSuccess = true;
+        _successMessage =
+            'Password reset email sent! Please check your inbox and follow the instructions to reset your password.';
+      });
     } on FirebaseAuthException catch (e) {
       String errorMessage;
       switch (e.code) {
@@ -111,19 +111,17 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
           errorMessage = 'Failed to send reset email. Please try again.';
       }
 
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-          _errorMessage = errorMessage;
-        });
-      }
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _errorMessage = errorMessage;
+      });
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-          _errorMessage = 'An unexpected error occurred. Please try again.';
-        });
-      }
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'An unexpected error occurred. Please try again.';
+      });
     }
   }
 

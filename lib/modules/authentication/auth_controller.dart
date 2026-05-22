@@ -1,46 +1,63 @@
+import 'dart:async' show unawaited;
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
-import 'dart:developer' as developer;
+import '../../core/auth/auth_lifecycle_cleanup.dart';
+import '../../core/observability/app_logger.dart';
+import '../../core/observability/error_reporter.dart';
+import '../../core/observability/error_ui.dart';
 import '../../data/models/user_model.dart';
 
 /// Controller for handling authentication operations.
-/// Enforces: active status check, role-based redirection, no self-registration.
+///
+/// PHASE 5 FIX:
+/// - Uses a single callable name 'logAuthEvent' consistently for all audit events.
+/// - Removed the duplicate LOGIN_SUCCESS log that was also firing from login_screen.dart.
+///   auth_controller.dart is now the ONLY place that logs LOGIN_SUCCESS.
+/// - login_screen.dart must be updated to REMOVE its duplicate logAuthEvent call.
+/// - LOGIN_FAILURE is logged here in auth_controller.dart only.
+/// - LOGOUT is logged here before signOut().
 class AuthController {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
+  // Single callable reference for all auth audit events
+  final HttpsCallable _logAuthEvent = FirebaseFunctions.instance.httpsCallable(
+    'logAuthEvent',
+  );
+
   /// Login with email and password.
   /// Returns UserModel if successful, throws exception on failure.
-  /// Enforces: account must be Active, role must exist, shopId must exist (except super_admin).
   Future<UserModel> login(String email, String password) async {
     try {
-      // Step 1: Authenticate with Firebase Auth
       final UserCredential userCredential = await _auth
           .signInWithEmailAndPassword(email: email.trim(), password: password);
 
       final String userId = userCredential.user!.uid;
 
-      // Step 2: Fetch user document from Firestore
       final DocumentSnapshot userDoc = await _firestore
           .collection('users')
           .doc(userId)
           .get();
 
       if (!userDoc.exists) {
-        await _auth.signOut();
+        await _endSession();
         throw Exception(
           'User account not found. Please contact administrator.',
         );
       }
 
-      final UserModel user = UserModel.fromMap(
-        userDoc.data() as Map<String, dynamic>,
-      );
+      final UserModel? user = UserModel.tryFromDocument(userDoc);
+      if (user == null) {
+        await _endSession();
+        throw Exception(
+          'User account data is invalid. Please contact administrator.',
+        );
+      }
 
-      // Step 3: Check account status (Active / Inactive / Suspended)
       if (!user.isActive) {
-        await _auth.signOut();
+        await _endSession();
         if (user.isSuspended) {
           throw Exception(
             'Your account has been suspended. Please contact administrator.',
@@ -51,31 +68,38 @@ class AuthController {
         );
       }
 
-      // Step 4: Validate role exists
       if (user.role.isEmpty) {
-        await _auth.signOut();
+        await _endSession();
         throw Exception('No role assigned. Please contact administrator.');
       }
 
-      // Step 5: Validate shopId for non-SuperAdmin users (canonical role)
       if (user.role != 'SuperAdmin' && user.shopId.isEmpty) {
-        await _auth.signOut();
+        await _endSession();
         throw Exception('No shop assigned. Please contact administrator.');
       }
 
-      developer.log(
-        'Login successful: ${user.name} (${user.role}) - Shop: ${user.shopId}',
-        name: 'AuthController',
+      AppLogger.info(
+        'Login successful: role=${user.role}',
+        tag: 'AuthController',
       );
 
+      unawaited(
+        ErrorReporter.instance.setUserContext(
+          userId: userId,
+          role: user.role,
+          shopId: user.shopId,
+        ),
+      );
+
+      // PHASE 5 FIX: auth_controller.dart is the single source of LOGIN_SUCCESS audit.
+      // login_screen.dart must NOT also call logAuthEvent for LOGIN_SUCCESS.
       try {
-        final logAuthEvent = FirebaseFunctions.instance.httpsCallable('logAuthEvent');
-        await logAuthEvent.call(<String, dynamic>{
+        await _logAuthEvent.call(<String, dynamic>{
           'action': 'LOGIN_SUCCESS',
           'shopId': user.shopId,
         });
-      } catch (e) {
-        developer.log('Failed to write login audit log: $e', name: 'AuthController');
+      } catch (e, st) {
+        reportCatch(e, stackTrace: st, tag: 'AuthController.loginAudit');
       }
 
       return user;
@@ -106,58 +130,61 @@ class AuthController {
         default:
           errorMessage = 'Login failed. Please try again.';
       }
-      
+
+      reportCatch(e, tag: 'AuthController.login');
+
+      // PHASE 5 FIX: LOGIN_FAILURE logged here only — login_screen.dart must NOT
+      // call logLoginFailure separately (different callable name = inconsistency).
       try {
-        final logAuthEvent = FirebaseFunctions.instance.httpsCallable('logAuthEvent');
-        await logAuthEvent.call(<String, dynamic>{
+        await _logAuthEvent.call(<String, dynamic>{
           'action': 'LOGIN_FAILURE',
-          'shopId': '', // Unknown shop ID for failed login
-          'details': 'Email: $email. Error: $errorMessage',
+          'shopId': '',
+          'details': 'Login attempt failed',
         });
-      } catch (_) {
-        // Ignore failure in audit logging
+      } catch (auditError, st) {
+        reportCatch(auditError, stackTrace: st, tag: 'AuthController.loginFailureAudit');
       }
-      
+
       throw Exception(errorMessage);
-    } catch (e) {
-      if (e is Exception) {
-        rethrow;
-      }
+    } catch (e, st) {
+      if (e is Exception) rethrow;
+      reportCatch(e, stackTrace: st, tag: 'AuthController.login');
       throw Exception('An unexpected error occurred. Please try again.');
     }
   }
 
-  /// Get current authenticated user
   User? get currentUser => _auth.currentUser;
 
-  /// Check if user is authenticated
   bool get isAuthenticated => _auth.currentUser != null;
 
-  /// Fetch the current user's UserModel from Firestore
   Future<UserModel?> getCurrentUserModel() async {
     final user = currentUser;
     if (user == null) return null;
-
     final doc = await _firestore.collection('users').doc(user.uid).get();
     if (!doc.exists) return null;
-
-    return UserModel.fromMap(doc.data() as Map<String, dynamic>);
+    return UserModel.tryFromDocument(doc);
   }
 
-  /// Sign out - audit via logAuthEvent then sign out (no direct Firestore write)
+  /// Clears caches/controllers and Firebase auth (no LOGOUT audit).
+  Future<void> _endSession() async {
+    await AuthLifecycleCleanup.run();
+    await ErrorReporter.instance.clearUserContext();
+    await _auth.signOut();
+  }
+
+  /// Sign out — audit BEFORE signing out so auth context is still valid.
   Future<void> signOut() async {
     try {
       final userModel = await getCurrentUserModel();
       final shopId = userModel?.shopId ?? '';
-      final logAuthEvent = FirebaseFunctions.instance.httpsCallable('logAuthEvent');
-      await logAuthEvent.call(<String, dynamic>{
+      await _logAuthEvent.call(<String, dynamic>{
         'action': 'LOGOUT',
         'shopId': shopId,
       });
-    } catch (_) {
-      // Non-blocking; do not fail sign out if audit log fails
+    } catch (e, st) {
+      reportCatch(e, stackTrace: st, tag: 'AuthController.logoutAudit');
     }
-    developer.log('User signed out', name: 'AuthController');
-    await _auth.signOut();
+    AppLogger.info('User signed out', tag: 'AuthController');
+    await _endSession();
   }
 }

@@ -104,6 +104,9 @@ export {
 // Super Admin: create Admin user (Auth + Firestore)
 export { createAdminUser } from './auth/createAdminUser';
 
+// Admin / Super Admin: create Employee user (Auth + Firestore; caller stays signed in)
+export { createEmployeeUser } from './auth/createEmployeeUser';
+
 // ============================================================================
 // PRODUCT TRIGGERS
 // ============================================================================

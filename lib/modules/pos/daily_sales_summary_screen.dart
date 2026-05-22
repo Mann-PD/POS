@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import '../../data/models/user_model.dart';
+import '../../core/firestore/firestore_parse.dart';
 import '../../data/models/order_model.dart';
+import '../../data/models/user_model.dart';
 
 /// Daily Sales Summary Screen - Employee's own sales performance
 class DailySalesSummaryScreen extends StatefulWidget {
@@ -29,9 +30,8 @@ class _DailySalesSummaryScreenState extends State<DailySalesSummaryScreen> {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
-        if (mounted) {
-          Navigator.of(context).pushReplacementNamed('/login');
-        }
+        if (!context.mounted) return;
+        Navigator.of(context).pushReplacementNamed('/login');
         return;
       }
 
@@ -41,9 +41,13 @@ class _DailySalesSummaryScreenState extends State<DailySalesSummaryScreen> {
           .get();
 
       if (userDoc.exists) {
-        final userData = UserModel.fromMap(
-          userDoc.data() as Map<String, dynamic>,
-        );
+        final userData = UserModel.tryFromDocument(userDoc);
+        if (userData == null) {
+          if (!mounted) return;
+          setState(() => _isLoading = false);
+          return;
+        }
+        if (!mounted) return;
         setState(() {
           _shopId = userData.shopId;
           _userId = userData.userId;
@@ -51,14 +55,14 @@ class _DailySalesSummaryScreenState extends State<DailySalesSummaryScreen> {
         });
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading user data: $e')),
-        );
-      }
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
       });
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error loading user data: $e')),
+      );
     }
   }
 
@@ -71,6 +75,7 @@ class _DailySalesSummaryScreenState extends State<DailySalesSummaryScreen> {
     );
 
     if (picked != null) {
+      if (!mounted) return;
       setState(() {
         _selectedDate = picked;
       });
@@ -195,6 +200,10 @@ class _DailySalesSummaryScreenState extends State<DailySalesSummaryScreen> {
                   .where('orderStatus', isEqualTo: 'locked')
                   .where('createdAt',
                       isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
+                  .where('createdAt',
+                      isLessThanOrEqualTo: Timestamp.fromDate(endOfDay))
+                  .orderBy('createdAt', descending: true)
+                  .limit(500)
                   .snapshots(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
@@ -246,11 +255,10 @@ class _DailySalesSummaryScreenState extends State<DailySalesSummaryScreen> {
                 }
 
                 // Filter orders by date range (client-side filtering for end date)
-                final allOrders = snapshot.data!.docs
-                    .map((doc) => OrderModel.fromMap(
-                          doc.data() as Map<String, dynamic>,
-                        ))
-                    .toList();
+                final allOrders = FirestoreParse.parseQueryDocs(
+                  snapshot.data!.docs,
+                  OrderModel.tryFromMap,
+                );
 
                 final orders = allOrders.where((order) {
                   final orderDate = order.createdAt;

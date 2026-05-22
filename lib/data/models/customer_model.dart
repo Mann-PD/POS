@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../core/firestore/firestore_parse.dart';
 
 class CustomerModel {
   final String customerId;
@@ -17,13 +18,26 @@ class CustomerModel {
 
   factory CustomerModel.fromMap(Map<String, dynamic> map) {
     return CustomerModel(
-      customerId: map['customerId'] as String? ?? '',
-      shopId: map['shopId'] as String? ?? '',
-      name: map['name'] as String? ?? '',
-      mobile: map['mobile'] as String? ?? '',
-      createdAt: map['createdAt'] is Timestamp
-          ? (map['createdAt'] as Timestamp).toDate()
-          : DateTime.now(),
+      customerId: FirestoreParse.stringField(map['customerId']),
+      shopId: FirestoreParse.stringField(map['shopId']),
+      name: FirestoreParse.stringField(map['name']),
+      mobile: FirestoreParse.stringField(map['mobile']),
+      createdAt: FirestoreParse.dateTimeField(map['createdAt']),
+    );
+  }
+
+  static CustomerModel? tryFromMap(Map<String, dynamic>? map) {
+    if (map == null) return null;
+    final customer = CustomerModel.fromMap(map);
+    if (customer.customerId.isEmpty) return null;
+    return customer;
+  }
+
+  static CustomerModel? tryFromQueryDocument(QueryDocumentSnapshot doc) {
+    return FirestoreParse.tryParseQuery(
+      doc,
+      CustomerModel.fromMap,
+      validate: (c) => c.customerId.isNotEmpty,
     );
   }
 

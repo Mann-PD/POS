@@ -1,9 +1,21 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_functions/cloud_functions.dart';
+import '../../core/observability/user_safe_error_mapper.dart';
 import 'auth_controller.dart';
 import 'session_manager.dart';
 import 'forgot_password.dart';
 import '../../data/models/user_model.dart';
+import '../../routing/guarded_navigator.dart';
+import '../../routing/role_based_router.dart';
+
+/// PHASE 5 FIX:
+/// - Removed duplicate logAuthEvent(LOGIN_SUCCESS) call from _handleLogin().
+///   auth_controller.dart already logs LOGIN_SUCCESS — calling it again here
+///   caused every successful login to write two audit entries.
+/// - Removed the logLoginFailure call from the catch block.
+///   auth_controller.dart already logs LOGIN_FAILURE via logAuthEvent consistently.
+///   login_screen.dart was using a different callable name (logLoginFailure) which
+///   created inconsistency. All audit logging now lives exclusively in auth_controller.dart.
+/// - Removed the cloud_functions import since this file no longer calls any callables.
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -35,21 +47,17 @@ class _LoginScreenState extends State<LoginScreen>
       duration: const Duration(milliseconds: 800),
     );
 
-    _fadeAnimation = Tween<double>(
-      begin: 0.0,
-      end: 1.0,
-    ).animate(CurvedAnimation(
-      parent: _animationController,
-      curve: Curves.easeInOut,
-    ));
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
+    );
 
-    _slideAnimation = Tween<Offset>(
-      begin: const Offset(0, 0.3),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(
-      parent: _animationController,
-      curve: Curves.easeOutCubic,
-    ));
+    _slideAnimation =
+        Tween<Offset>(begin: const Offset(0, 0.3), end: Offset.zero).animate(
+          CurvedAnimation(
+            parent: _animationController,
+            curve: Curves.easeOutCubic,
+          ),
+        );
 
     _animationController.forward();
   }
@@ -63,85 +71,53 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   Future<void> _handleLogin() async {
-  if (!_formKey.currentState!.validate()) {
-    return;
-  }
-
-  setState(() {
-    _isLoading = true;
-    _errorMessage = null;
-  });
-
-  try {
-    final UserModel user = await _authController.login(
-      _emailController.text,
-      _passwordController.text,
-    );
-
-    // Audit log (non-blocking)
-    try {
-      final logAuthEvent =
-          FirebaseFunctions.instance.httpsCallable('logAuthEvent');
-      await logAuthEvent.call({
-        'action': 'LOGIN_SUCCESS',
-        'shopId': user.shopId,
-      });
-    } catch (_) {}
-
-    // Register session
-    await SessionManager.registerActiveSession(user.userId);
-
-    if (!mounted) return;
+    if (!_formKey.currentState!.validate()) return;
 
     setState(() {
-      _isLoading = false;
+      _isLoading = true;
       _errorMessage = null;
     });
 
-    // Show success message
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Welcome back, ${user.name}!'),
-        backgroundColor: Theme.of(context).colorScheme.primary,
-      ),
-    );
-
-    // 🔥 CRITICAL FIX — NAVIGATION
-    print("ROLE: ${user.role}");
-
-    if (user.role == 'Admin') {
-      Navigator.pushReplacementNamed(context, '/admin');
-    } else if (user.role == 'Employee') {
-      Navigator.pushReplacementNamed(context, '/employee');
-    } else if (user.role == 'Viewer') {
-      Navigator.pushReplacementNamed(context, '/viewer');
-    } else if (user.role == 'SuperAdmin') {
-      Navigator.pushReplacementNamed(context, '/super_admin');
-    } else {
-      // fallback safety
-      Navigator.pushReplacementNamed(context, '/');
-    }
-  } catch (e) {
-    // Audit failure (non-blocking)
     try {
-      final logLoginFailure =
-          FirebaseFunctions.instance.httpsCallable('logLoginFailure');
-      await logLoginFailure.call({
-        'email': _emailController.text.trim(),
-        'errorMessage':
-            e.toString().replaceFirst('Exception: ', ''),
-      });
-    } catch (_) {}
+      final UserModel user = await _authController.login(
+        _emailController.text,
+        _passwordController.text,
+      );
+      // PHASE 5 FIX: Removed duplicate logAuthEvent(LOGIN_SUCCESS) call that was here.
+      // auth_controller.login() already logs LOGIN_SUCCESS before returning.
 
-    if (mounted) {
+      await SessionManager.registerActiveSession(user.userId);
+
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
-        _errorMessage =
-            e.toString().replaceFirst('Exception: ', '');
+        _errorMessage = null;
+      });
+      if (!context.mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Welcome back, ${user.name}!'),
+          backgroundColor: Theme.of(context).colorScheme.primary,
+        ),
+      );
+
+      Navigator.pushReplacementNamed(
+        context,
+        RoleBasedRouter.getInitialRoute(user.role),
+        arguments: user,
+      );
+    } catch (e) {
+      // PHASE 5 FIX: Removed duplicate logLoginFailure call that was here.
+      // auth_controller.login() already logs LOGIN_FAILURE in its catch block.
+
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _errorMessage = UserSafeErrorMapper.messageFor(e);
       });
     }
   }
-}
 
   @override
   Widget build(BuildContext context) {
@@ -196,9 +172,7 @@ class _LoginScreenState extends State<LoginScreen>
   ) {
     return Card(
       elevation: 8,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(24),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       child: Container(
         padding: EdgeInsets.all(isTablet ? 48 : 32),
         decoration: BoxDecoration(
@@ -276,9 +250,7 @@ class _LoginScreenState extends State<LoginScreen>
         labelText: 'Email',
         hintText: 'Enter your email',
         prefixIcon: Icon(Icons.email_outlined, color: colorScheme.primary),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
         filled: true,
         fillColor: colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
       ),
@@ -308,28 +280,20 @@ class _LoginScreenState extends State<LoginScreen>
         prefixIcon: Icon(Icons.lock_outlined, color: colorScheme.primary),
         suffixIcon: IconButton(
           icon: Icon(
-            _obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+            _obscurePassword
+                ? Icons.visibility_outlined
+                : Icons.visibility_off_outlined,
             color: colorScheme.onSurfaceVariant,
           ),
-          onPressed: () {
-            setState(() {
-              _obscurePassword = !_obscurePassword;
-            });
-          },
+          onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
         ),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
         filled: true,
         fillColor: colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
       ),
       validator: (value) {
-        if (value == null || value.isEmpty) {
-          return 'Please enter your password';
-        }
-        if (value.length < 6) {
-          return 'Password must be at least 6 characters';
-        }
+        if (value == null || value.isEmpty) return 'Please enter your password';
+        if (value.length < 6) return 'Password must be at least 6 characters';
         return null;
       },
     );
@@ -370,13 +334,10 @@ class _LoginScreenState extends State<LoginScreen>
       child: TextButton(
         onPressed: _isLoading
             ? null
-            : () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (context) => const ForgotPasswordScreen(),
-                  ),
-                );
-              },
+            : () => GuardedNavigator.pushPublic(
+                context,
+                page: const ForgotPasswordScreen(),
+              ),
         style: TextButton.styleFrom(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           minimumSize: Size.zero,
@@ -399,9 +360,7 @@ class _LoginScreenState extends State<LoginScreen>
       onPressed: _isLoading ? null : _handleLogin,
       style: FilledButton.styleFrom(
         padding: const EdgeInsets.symmetric(vertical: 16),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         backgroundColor: colorScheme.primary,
         foregroundColor: colorScheme.onPrimary,
       ),

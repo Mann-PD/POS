@@ -53,7 +53,14 @@ class _EmployeePerformanceScreenState
         });
         return;
       }
-      final u = UserModel.fromMap(doc.data() as Map<String, dynamic>);
+      final u = UserModel.tryFromDocument(doc);
+      if (u == null) {
+        setState(() {
+          _loadingUser = false;
+          _error = 'User document invalid';
+        });
+        return;
+      }
       final now = DateTime.now();
       final initialRange = DateTimeRange(
         start: DateTime(now.year, now.month, now.day)

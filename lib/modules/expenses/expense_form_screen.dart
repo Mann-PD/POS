@@ -35,15 +35,18 @@ class _ExpenseFormScreenState extends State<ExpenseFormScreen> {
       _descriptionController.text = widget.expense!.description;
       _selectedDate = widget.expense!.createdAt;
     }
-    _loadUserData();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _loadUserData(context);
+    });
   }
 
-  Future<void> _loadUserData() async {
+  Future<void> _loadUserData(BuildContext pageContext) async {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
-        if (mounted) {
-          Navigator.of(context).pop();
+        if (pageContext.mounted) {
+          Navigator.of(pageContext).pop();
         }
         return;
       }
@@ -54,53 +57,58 @@ class _ExpenseFormScreenState extends State<ExpenseFormScreen> {
           .get();
 
       if (userDoc.exists) {
-        final userData = UserModel.fromMap(
-          userDoc.data() as Map<String, dynamic>,
-        );
+        final userData = UserModel.tryFromDocument(userDoc);
+        if (userData == null) return;
+        if (!mounted) return;
         setState(() {
           _shopId = userData.shopId;
         });
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
           SnackBar(content: Text('Error loading user data: $e')),
         );
       }
     }
   }
 
-  Future<void> _selectDate(BuildContext context) async {
+  Future<void> _selectDate(BuildContext pageContext) async {
     final DateTime? picked = await showDatePicker(
-      context: context,
+      context: pageContext,
       initialDate: _selectedDate,
       firstDate: DateTime(2020),
       lastDate: DateTime.now(), // Cannot select future dates
     );
     if (picked != null && picked != _selectedDate) {
+      if (!mounted) return;
       setState(() {
         _selectedDate = picked;
       });
     }
   }
 
-  Future<void> _saveExpense() async {
+  Future<void> _saveExpense(BuildContext pageContext) async {
     if (!_formKey.currentState!.validate()) {
       return;
     }
 
     if (_shopId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Shop ID not found')),
-      );
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
+          const SnackBar(content: Text('Shop ID not found')),
+        );
+      }
       return;
     }
 
     // Check if date is in the future
     if (_selectedDate.isAfter(DateTime.now())) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Cannot add expenses for future dates')),
-      );
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
+          const SnackBar(content: Text('Cannot add expenses for future dates')),
+        );
+      }
       return;
     }
 
@@ -128,11 +136,11 @@ class _ExpenseFormScreenState extends State<ExpenseFormScreen> {
           'description': description,
         });
 
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
+        if (pageContext.mounted) {
+          ScaffoldMessenger.of(pageContext).showSnackBar(
             const SnackBar(content: Text('Expense updated successfully')),
           );
-          Navigator.of(context).pop();
+          Navigator.of(pageContext).pop();
         }
       } else {
         // Create new expense via Cloud Function
@@ -143,16 +151,16 @@ class _ExpenseFormScreenState extends State<ExpenseFormScreen> {
           'description': description,
         });
 
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
+        if (pageContext.mounted) {
+          ScaffoldMessenger.of(pageContext).showSnackBar(
             const SnackBar(content: Text('Expense created successfully')),
           );
-          Navigator.of(context).pop();
+          Navigator.of(pageContext).pop();
         }
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
           SnackBar(content: Text('Error saving expense: $e')),
         );
       }
@@ -237,7 +245,7 @@ class _ExpenseFormScreenState extends State<ExpenseFormScreen> {
               ),
               const SizedBox(height: 32),
               FilledButton(
-                onPressed: _isLoading ? null : _saveExpense,
+                onPressed: _isLoading ? null : () => _saveExpense(context),
                 style: FilledButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 16),
                 ),

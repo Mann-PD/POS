@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
+import '../../core/observability/error_ui.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../core/firestore/firestore_pagination.dart';
 import '../../data/models/order_model.dart';
 import '../../data/models/expense_model.dart';
+import '../../data/models/product_model.dart';
 import '../../data/models/user_model.dart';
+import '../../routing/permission_gate.dart';
+import '../../routing/screen_permission.dart';
 import 'reports_service.dart';
 
 /// Full Reports & Analytics. Read-only, shop-scoped by role, locked orders only.
@@ -32,6 +37,8 @@ class _ReportsDashboardState extends State<ReportsDashboard> {
   String? _userId;
   String? _role;
   bool _loading = true;
+  Stream<List<OrderModel>>? _lockedOrdersStream;
+  Stream<List<ExpenseModel>>? _expensesStream;
 
   @override
   void initState() {
@@ -46,12 +53,13 @@ class _ReportsDashboardState extends State<ReportsDashboard> {
       return;
     }
     if (widget.shopId != null && widget.userId != null && widget.role != null) {
-      setState(() {
-        _shopId = widget.shopId;
-        _userId = widget.userId;
-        _role = widget.role;
-        _loading = false;
-      });
+        setState(() {
+          _shopId = widget.shopId;
+          _userId = widget.userId;
+          _role = widget.role;
+          _loading = false;
+          _initReportStreams();
+        });
       return;
     }
     try {
@@ -60,17 +68,23 @@ class _ReportsDashboardState extends State<ReportsDashboard> {
           .doc(user.uid)
           .get();
       if (doc.exists) {
-        final u = UserModel.fromMap(doc.data() as Map<String, dynamic>);
+        final u = UserModel.tryFromDocument(doc);
+        if (u == null) {
+          setState(() => _loading = false);
+          return;
+        }
         setState(() {
           _shopId = widget.shopId ?? u.shopId;
           _userId = widget.userId ?? u.userId;
           _role = widget.role ?? u.role;
           _loading = false;
+          _initReportStreams();
         });
       } else {
         setState(() => _loading = false);
       }
-    } catch (_) {
+    } catch (e, st) {
+      reportCatch(e, stackTrace: st, tag: 'ReportsDashboard._load');
       setState(() => _loading = false);
     }
   }
@@ -82,8 +96,25 @@ class _ReportsDashboardState extends State<ReportsDashboard> {
       _role != null &&
       _role!.toLowerCase().replaceAll(RegExp(r'[_\s-]'), '') == 'employee';
 
+  void _initReportStreams() {
+    final shopId = _isSuperAdmin ? null : _shopId;
+    final employeeId = _isEmployee ? _userId : null;
+    _lockedOrdersStream ??= _reports.streamLockedOrders(
+      shopId: shopId,
+      employeeId: employeeId,
+    );
+    _expensesStream ??= _reports.streamExpenses(shopId: shopId);
+  }
+
   @override
   Widget build(BuildContext context) {
+    return PermissionGate(
+      permission: ScreenPermission.reportsDashboard,
+      child: _buildContent(context),
+    );
+  }
+
+  Widget _buildContent(BuildContext context) {
     if (_loading) {
       return Scaffold(
         appBar: AppBar(title: const Text('Reports & Analytics')),
@@ -96,41 +127,44 @@ class _ReportsDashboardState extends State<ReportsDashboard> {
       child: Scaffold(
         appBar: AppBar(
           title: Text(widget.readOnly ? 'Reports (View Only)' : 'Reports & Analytics'),
-          bottom: TabBar(
-            isScrollable: true,
-            tabs: const [
-              Tab(text: 'Sales'),
-              Tab(text: 'Product-wise'),
-              Tab(text: 'Employee'),
-              Tab(text: 'Expenses'),
-              Tab(text: 'Net Profit'),
-            ],
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(72),
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text(
+                    'Live data capped at recent ${FirestorePageSize.reportStreamCap} records per tab',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+                const TabBar(
+                  isScrollable: true,
+                  tabs: [
+                    Tab(text: 'Sales'),
+                    Tab(text: 'Product-wise'),
+                    Tab(text: 'Employee'),
+                    Tab(text: 'Expenses'),
+                    Tab(text: 'Net Profit'),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
         body: TabBarView(
           children: [
-            _SalesTab(
-              reports: _reports,
-              shopId: _isSuperAdmin ? null : _shopId,
-              employeeId: _isEmployee ? _userId : null,
-            ),
+            _SalesTab(ordersStream: _lockedOrdersStream!),
             _ProductWiseTab(
               reports: _reports,
               shopId: _isSuperAdmin ? null : _shopId,
               employeeId: _isEmployee ? _userId : null,
             ),
-            _EmployeeTab(
-              reports: _reports,
-              shopId: _isSuperAdmin ? null : _shopId,
-            ),
-            _ExpenseTab(
-              reports: _reports,
-              shopId: _isSuperAdmin ? null : _shopId,
-            ),
+            _EmployeeTab(ordersStream: _lockedOrdersStream!),
+            _ExpenseTab(expensesStream: _expensesStream!),
             _NetProfitTab(
-              reports: _reports,
-              shopId: _isSuperAdmin ? null : _shopId,
-              employeeId: _isEmployee ? _userId : null,
+              ordersStream: _lockedOrdersStream!,
+              expensesStream: _expensesStream!,
             ),
           ],
         ),
@@ -140,20 +174,14 @@ class _ReportsDashboardState extends State<ReportsDashboard> {
 }
 
 class _SalesTab extends StatelessWidget {
-  const _SalesTab({
-    required this.reports,
-    this.shopId,
-    this.employeeId,
-  });
+  const _SalesTab({required this.ordersStream});
 
-  final ReportsService reports;
-  final String? shopId;
-  final String? employeeId;
+  final Stream<List<OrderModel>> ordersStream;
 
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<List<OrderModel>>(
-      stream: reports.streamLockedOrders(shopId: shopId, employeeId: employeeId),
+      stream: ordersStream,
       builder: (context, snap) {
         if (snap.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
@@ -273,8 +301,9 @@ class _ProductWiseTabState extends State<_ProductWiseTab> {
       final firestore = FirebaseFirestore.instance;
       for (final pid in map.keys.toList()) {
         final doc = await firestore.collection('products').doc(pid).get();
-        final name = doc.exists && doc.data() != null
-            ? (doc.data()!['name'] as String? ?? pid)
+        final product = ProductModel.tryFromDocument(doc);
+        final name = product != null && product.name.isNotEmpty
+            ? product.name
             : pid;
         map[pid] = _ProductRow(
           productId: pid,
@@ -345,15 +374,14 @@ class _ProductRow {
 }
 
 class _EmployeeTab extends StatelessWidget {
-  const _EmployeeTab({required this.reports, this.shopId});
+  const _EmployeeTab({required this.ordersStream});
 
-  final ReportsService reports;
-  final String? shopId;
+  final Stream<List<OrderModel>> ordersStream;
 
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<List<OrderModel>>(
-      stream: reports.streamLockedOrders(shopId: shopId),
+      stream: ordersStream,
       builder: (context, snap) {
         if (snap.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
@@ -402,15 +430,14 @@ class _EmployeeTab extends StatelessWidget {
 }
 
 class _ExpenseTab extends StatelessWidget {
-  const _ExpenseTab({required this.reports, this.shopId});
+  const _ExpenseTab({required this.expensesStream});
 
-  final ReportsService reports;
-  final String? shopId;
+  final Stream<List<ExpenseModel>> expensesStream;
 
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<List<ExpenseModel>>(
-      stream: reports.streamExpenses(shopId: shopId),
+      stream: expensesStream,
       builder: (context, snap) {
         if (snap.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
@@ -471,33 +498,28 @@ class _ExpenseTab extends StatelessWidget {
 
 class _NetProfitTab extends StatelessWidget {
   const _NetProfitTab({
-    required this.reports,
-    this.shopId,
-    this.employeeId,
+    required this.ordersStream,
+    required this.expensesStream,
   });
 
-  final ReportsService reports;
-  final String? shopId;
-  final String? employeeId;
+  final Stream<List<OrderModel>> ordersStream;
+  final Stream<List<ExpenseModel>> expensesStream;
 
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<List<OrderModel>>(
-      stream: reports.streamLockedOrders(shopId: shopId, employeeId: employeeId),
+      stream: ordersStream,
       builder: (context, orderSnap) {
-        if (orderSnap.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        final orders = orderSnap.data ?? [];
-        final sales = orders.fold(0.0, (s, o) => s + o.totalAmount);
-
         return StreamBuilder<List<ExpenseModel>>(
-          stream: reports.streamExpenses(shopId: shopId),
+          stream: expensesStream,
           builder: (context, expSnap) {
-            if (expSnap.connectionState == ConnectionState.waiting) {
+            if (orderSnap.connectionState == ConnectionState.waiting ||
+                expSnap.connectionState == ConnectionState.waiting) {
               return const Center(child: CircularProgressIndicator());
             }
+            final orders = orderSnap.data ?? [];
             final expenses = expSnap.data ?? [];
+            final sales = orders.fold(0.0, (s, o) => s + o.totalAmount);
             final expTotal = expenses.fold(0.0, (s, e) => s + e.amount);
             final profit = sales - expTotal;
 

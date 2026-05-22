@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../../core/firestore/firestore_rule_safe_update.dart';
 import '../../data/models/shop_model.dart';
 
 /// Super Admin: view and edit a single shop.
@@ -35,12 +36,14 @@ class _ShopDetailScreenState extends State<ShopDetailScreen> {
     super.dispose();
   }
 
-  Future<void> _saveChanges() async {
+  Future<void> _saveChanges(BuildContext pageContext) async {
     final newName = _nameController.text.trim();
     if (newName.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Shop name cannot be empty')),
-      );
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
+          const SnackBar(content: Text('Shop name cannot be empty')),
+        );
+      }
       return;
     }
     setState(() => _saving = true);
@@ -48,47 +51,62 @@ class _ShopDetailScreenState extends State<ShopDetailScreen> {
       await FirebaseFirestore.instance
           .collection('shops')
           .doc(widget.shop.shopId)
-          .update({'name': newName});
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+          .update(
+            FirestoreRuleSafeUpdate.shop(
+              widget.shop,
+              changes: {'name': newName},
+            ),
+          );
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
           const SnackBar(content: Text('Shop updated')),
         );
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
           SnackBar(content: Text('Error: $e')),
         );
       }
     } finally {
-      if (mounted) setState(() => _saving = false);
+      if (mounted) {
+        setState(() => _saving = false);
+      }
     }
   }
 
-  Future<void> _toggleStatus() async {
+  Future<void> _toggleStatus(BuildContext pageContext) async {
     final newStatus = _status == 'Active' ? 'Inactive' : 'Active';
     setState(() => _saving = true);
     try {
       await FirebaseFirestore.instance
           .collection('shops')
           .doc(widget.shop.shopId)
-          .update({'status': newStatus});
-      if (mounted) {
-        setState(() {
-          _status = newStatus;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
+          .update(
+            FirestoreRuleSafeUpdate.shop(
+              widget.shop,
+              changes: {'status': newStatus},
+            ),
+          );
+      if (!mounted) return;
+      setState(() {
+        _status = newStatus;
+      });
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
           SnackBar(content: Text('Shop status set to $newStatus')),
         );
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
           SnackBar(content: Text('Error: $e')),
         );
       }
     } finally {
-      if (mounted) setState(() => _saving = false);
+      if (mounted) {
+        setState(() => _saving = false);
+      }
     }
   }
 
@@ -103,7 +121,7 @@ class _ShopDetailScreenState extends State<ShopDetailScreen> {
         title: const Text('Shop Details'),
         actions: [
           TextButton.icon(
-            onPressed: _saving ? null : _saveChanges,
+            onPressed: _saving ? null : () => _saveChanges(context),
             icon: const Icon(Icons.save, size: 18),
             label: const Text('Save'),
           ),
@@ -150,7 +168,7 @@ class _ShopDetailScreenState extends State<ShopDetailScreen> {
                     ),
                   ),
                   FilledButton.icon(
-                    onPressed: _saving ? null : _toggleStatus,
+                    onPressed: _saving ? null : () => _toggleStatus(context),
                     icon: Icon(
                       isActive ? Icons.block : Icons.check_circle,
                     ),

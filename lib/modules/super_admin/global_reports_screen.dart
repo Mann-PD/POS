@@ -1,16 +1,31 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../../core/firestore/firestore_pagination.dart';
 import '../../data/models/order_model.dart';
 import '../../data/models/shop_model.dart';
 import '../reports/reports_service.dart';
 
-/// Super Admin: cross-shop analytics.
-/// Shows total sales across all shops, total orders, and top performing shops.
-class GlobalReportsScreen extends StatelessWidget {
-  GlobalReportsScreen({super.key});
+/// Super Admin: cross-shop analytics (last 90 days, batched reads).
+class GlobalReportsScreen extends StatefulWidget {
+  const GlobalReportsScreen({super.key});
 
+  @override
+  State<GlobalReportsScreen> createState() => _GlobalReportsScreenState();
+}
+
+class _GlobalReportsScreenState extends State<GlobalReportsScreen> {
   final ReportsService _reports = ReportsService();
+  late final Future<List<OrderModel>> _ordersFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _ordersFuture = _reports.getLockedOrdersInRangeBatched(
+      start: reportRangeStart(),
+      end: reportRangeEnd(),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -20,9 +35,19 @@ class GlobalReportsScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Global Reports'),
+        bottom: const PreferredSize(
+          preferredSize: Size.fromHeight(28),
+          child: Padding(
+            padding: EdgeInsets.only(bottom: 8),
+            child: Text(
+              'Last ${FirestorePageSize.reportRangeDays} days • locked orders',
+              style: TextStyle(fontSize: 12),
+            ),
+          ),
+        ),
       ),
-      body: StreamBuilder<List<OrderModel>>(
-        stream: _reports.streamLockedOrders(),
+      body: FutureBuilder<List<OrderModel>>(
+        future: _ordersFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
@@ -33,7 +58,7 @@ class GlobalReportsScreen extends StatelessWidget {
           final orders = snapshot.data ?? [];
           if (orders.isEmpty) {
             return const Center(
-              child: Text('No locked orders found in the system.'),
+              child: Text('No locked orders in the selected period.'),
             );
           }
 
@@ -132,10 +157,8 @@ class GlobalReportsScreen extends StatelessWidget {
       if (name == 'Loading...' && s.shopId.isNotEmpty) {
         final doc =
             await firestore.collection('shops').doc(s.shopId).get();
-        if (doc.exists && doc.data() != null) {
-          final shop = ShopModel.fromMap(
-            doc.data() as Map<String, dynamic>,
-          );
+        final shop = ShopModel.tryFromDocument(doc);
+        if (shop != null) {
           name = shop.name.isNotEmpty ? shop.name : shop.shopId;
         }
       }
@@ -223,4 +246,3 @@ class _ShopAgg {
     );
   }
 }
-

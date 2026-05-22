@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:get/get.dart';
 import '../../../data/models/product_model.dart';
 import '../../../data/models/user_model.dart';
+import '../../../widgets/firestore_paginated_list.dart';
+import '../../../routing/permission_gate.dart';
+import '../../../routing/screen_permission.dart';
 import 'inventory_controller.dart';
 
 /// Inventory Management Screen - Admin view and management of stock levels
@@ -23,15 +27,18 @@ class _InventoryScreenState extends State<InventoryScreen> {
   @override
   void initState() {
     super.initState();
-    _loadUserData();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _loadUserData(context);
+    });
   }
 
-  Future<void> _loadUserData() async {
+  Future<void> _loadUserData(BuildContext pageContext) async {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
-        if (mounted) {
-          Navigator.of(context).pop();
+        if (pageContext.mounted) {
+          Navigator.of(pageContext).pop();
         }
         return;
       }
@@ -42,9 +49,9 @@ class _InventoryScreenState extends State<InventoryScreen> {
           .get();
 
       if (userDoc.exists) {
-        final userData = UserModel.fromMap(
-          userDoc.data() as Map<String, dynamic>,
-        );
+        final userData = UserModel.tryFromDocument(userDoc);
+        if (userData == null) return;
+        if (!mounted) return;
         setState(() {
           _shopId = userData.shopId;
           _isLoading = false;
@@ -52,11 +59,12 @@ class _InventoryScreenState extends State<InventoryScreen> {
         _controller.setLoading(false);
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
           SnackBar(content: Text('Error loading user data: $e')),
         );
       }
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
       });
@@ -65,29 +73,34 @@ class _InventoryScreenState extends State<InventoryScreen> {
   }
 
   Future<void> _adjustStock(
+    BuildContext pageContext,
     ProductModel product,
     double adjustment,
     bool isIncrease,
+    String reason,
   ) async {
+    if (_shopId == null || _shopId!.isEmpty) {
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
+          const SnackBar(content: Text('Shop ID not found')),
+        );
+      }
+      return;
+    }
+
     try {
       _controller.setLoading(true);
-      final newStock = isIncrease
-          ? product.stock + adjustment
-          : product.stock - adjustment;
+      final signedAdjustment = isIncrease ? adjustment : -adjustment;
 
-      if (newStock < 0) {
-        throw Exception('Stock cannot be negative');
-      }
-
-      await FirebaseFirestore.instance
-          .collection('products')
-          .doc(product.productId)
-          .update({
-        'stock': newStock,
+      await FirebaseFunctions.instance.httpsCallable('adjustStock').call({
+        'productId': product.productId,
+        'shopId': _shopId,
+        'adjustment': signedAdjustment,
+        'reason': reason,
       });
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
           SnackBar(
             content: Text(
               'Stock ${isIncrease ? 'increased' : 'decreased'} by ${adjustment.toStringAsFixed(2)} ${product.measurementType}',
@@ -95,9 +108,19 @@ class _InventoryScreenState extends State<InventoryScreen> {
           ),
         );
       }
+    } on FirebaseFunctionsException catch (e) {
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
+          SnackBar(
+            content: Text(
+              e.message ?? 'Failed to adjust stock (${e.code})',
+            ),
+          ),
+        );
+      }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
           SnackBar(content: Text('Error updating stock: $e')),
         );
       }
@@ -107,13 +130,15 @@ class _InventoryScreenState extends State<InventoryScreen> {
   }
 
   Future<void> _showStockAdjustmentDialog(
+    BuildContext pageContext,
     ProductModel product,
     bool isIncrease,
   ) async {
     final adjustmentController = TextEditingController();
+    final reasonController = TextEditingController();
 
     final result = await showDialog<Map<String, dynamic>>(
-      context: context,
+      context: pageContext,
       builder: (context) => AlertDialog(
         title: Text(
           isIncrease ? 'Increase Stock' : 'Decrease Stock',
@@ -142,6 +167,15 @@ class _InventoryScreenState extends State<InventoryScreen> {
               keyboardType: TextInputType.number,
               autofocus: true,
             ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: reasonController,
+              decoration: const InputDecoration(
+                labelText: 'Reason',
+                border: OutlineInputBorder(),
+              ),
+              maxLines: 2,
+            ),
           ],
         ),
         actions: [
@@ -152,15 +186,17 @@ class _InventoryScreenState extends State<InventoryScreen> {
           FilledButton(
             onPressed: () {
               final adjustment = double.tryParse(adjustmentController.text);
-              if (adjustment != null && adjustment > 0) {
+              final reason = reasonController.text.trim();
+              if (adjustment != null && adjustment > 0 && reason.isNotEmpty) {
                 Navigator.pop(context, {
                   'adjustment': adjustment,
                   'isIncrease': isIncrease,
+                  'reason': reason,
                 });
               } else {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
-                    content: Text('Please enter a valid amount'),
+                    content: Text('Enter a valid amount and reason'),
                   ),
                 );
               }
@@ -171,10 +207,10 @@ class _InventoryScreenState extends State<InventoryScreen> {
       ),
     );
 
-    if (result != null && mounted) {
+    if (result != null && pageContext.mounted) {
       // Show confirmation dialog
       final confirm = await showDialog<bool>(
-        context: context,
+        context: pageContext,
         builder: (context) => AlertDialog(
           title: const Text('Confirm Stock Adjustment'),
           content: Column(
@@ -218,11 +254,13 @@ class _InventoryScreenState extends State<InventoryScreen> {
         ),
       );
 
-      if (confirm == true) {
+      if (confirm == true && pageContext.mounted) {
         _adjustStock(
+          pageContext,
           product,
           result['adjustment'] as double,
           result['isIncrease'] as bool,
+          result['reason'] as String,
         );
       }
     }
@@ -230,6 +268,13 @@ class _InventoryScreenState extends State<InventoryScreen> {
 
   @override
   Widget build(BuildContext context) {
+    return PermissionGate(
+      permission: ScreenPermission.inventory,
+      child: _buildContent(context),
+    );
+  }
+
+  Widget _buildContent(BuildContext context) {
     if (_isLoading) {
       return Scaffold(
         appBar: AppBar(title: const Text('Inventory')),
@@ -287,112 +332,47 @@ class _InventoryScreenState extends State<InventoryScreen> {
 
           const SizedBox(height: 8),
 
-          // Inventory list
           Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('products')
-                  .where('shopId', isEqualTo: _shopId)
-                  .orderBy('name')
-                  .snapshots(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
-                if (snapshot.hasError) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.error_outline,
-                          size: 64,
-                          color: Theme.of(context).colorScheme.error,
-                        ),
-                        const SizedBox(height: 16),
-                        Text('Error loading inventory: ${snapshot.error}'),
-                      ],
-                    ),
-                  );
-                }
-
-                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.warehouse_outlined,
-                          size: 64,
-                          color: Theme.of(context).colorScheme.outline,
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          'No products found',
-                          style: Theme.of(context).textTheme.titleLarge,
-                        ),
-                      ],
-                    ),
-                  );
-                }
-
-                final allProducts = snapshot.data!.docs
-                    .map((doc) => ProductModel.fromMap(
-                          doc.data() as Map<String, dynamic>,
-                        ))
-                    .toList();
-
-                return Obx(() {
-                  var filteredProducts = allProducts;
-
-                  // Filter by search query
-                  if (_controller.searchQuery.value.isNotEmpty) {
-                    filteredProducts = filteredProducts
-                        .where((product) => product.name
-                            .toLowerCase()
-                            .contains(_controller.searchQuery.value.toLowerCase()))
+            child: Obx(
+              () => FirestorePaginatedList<ProductModel>(
+                cacheKey: 'inventory_products_$_shopId',
+                queryBuilder: () => FirebaseFirestore.instance
+                    .collection('products')
+                    .where('shopId', isEqualTo: _shopId)
+                    .orderBy('name'),
+                parse: (data, _) => ProductModel.tryFromMap(data),
+                itemKey: (p) => p.productId,
+                filterItems: (items) {
+                  var filtered = items;
+                  final q = _controller.searchQuery.value.trim().toLowerCase();
+                  if (q.isNotEmpty) {
+                    filtered = filtered
+                        .where((p) => p.name.toLowerCase().contains(q))
                         .toList();
                   }
-
-                  // Filter by status
-                  if (_controller.selectedFilter.value == 'Active') {
-                    filteredProducts = filteredProducts
-                        .where((product) => product.status == 'Active')
+                  final f = _controller.selectedFilter.value;
+                  if (f == 'Active') {
+                    filtered =
+                        filtered.where((p) => p.status == 'Active').toList();
+                  } else if (f == 'Inactive') {
+                    filtered =
+                        filtered.where((p) => p.status == 'Inactive').toList();
+                  } else if (f == 'low-stock') {
+                    filtered = filtered
+                        .where((p) => p.stock > 0 && p.stock <= 10)
                         .toList();
-                  } else if (_controller.selectedFilter.value == 'Inactive') {
-                    filteredProducts = filteredProducts
-                        .where((product) => product.status == 'Inactive')
-                        .toList();
-                  } else if (_controller.selectedFilter.value == 'low-stock') {
-                    filteredProducts = filteredProducts
-                        .where((product) => product.stock > 0 && product.stock <= 10)
-                        .toList();
-                  } else if (_controller.selectedFilter.value == 'out-of-stock') {
-                    filteredProducts = filteredProducts
-                        .where((product) => product.stock <= 0)
-                        .toList();
+                  } else if (f == 'out-of-stock') {
+                    filtered =
+                        filtered.where((p) => p.stock <= 0).toList();
                   }
-
-                  if (filteredProducts.isEmpty) {
-                    return Center(
-                      child: Text(
-                        'No products match your filters',
-                        style: Theme.of(context).textTheme.bodyLarge,
-                      ),
-                    );
-                  }
-
-                  return ListView.builder(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: filteredProducts.length,
-                    itemBuilder: (context, index) {
-                      final product = filteredProducts[index];
-                      return _buildInventoryCard(context, product);
-                    },
-                  );
-                });
-              },
+                  return filtered;
+                },
+                emptyBuilder: (context) => const Center(
+                  child: Text('No products match your filters'),
+                ),
+                itemBuilder: (context, product) =>
+                    _buildInventoryCard(context, product),
+              ),
             ),
           ),
         ],
@@ -509,7 +489,8 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 Row(
                   children: [
                     FilledButton.icon(
-                      onPressed: () => _showStockAdjustmentDialog(product, false),
+                      onPressed: () =>
+                          _showStockAdjustmentDialog(context, product, false),
                       icon: const Icon(Icons.remove, size: 18),
                       label: const Text('Decrease'),
                       style: FilledButton.styleFrom(
@@ -522,7 +503,8 @@ class _InventoryScreenState extends State<InventoryScreen> {
                     ),
                     const SizedBox(width: 8),
                     FilledButton.icon(
-                      onPressed: () => _showStockAdjustmentDialog(product, true),
+                      onPressed: () =>
+                          _showStockAdjustmentDialog(context, product, true),
                       icon: const Icon(Icons.add, size: 18),
                       label: const Text('Increase'),
                       style: FilledButton.styleFrom(

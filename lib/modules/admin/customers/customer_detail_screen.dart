@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../../../core/firestore/firestore_rule_safe_update.dart';
+import '../../../core/firestore/firestore_pagination.dart';
+import '../../../core/firestore/firestore_stream_cache.dart';
 import '../../../data/models/customer_model.dart';
+import '../../../core/firestore/firestore_parse.dart';
 import '../../../data/models/order_model.dart';
 
 /// Customer Detail Screen - View and edit customer, view order history
@@ -25,12 +29,25 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   late TextEditingController _mobileController;
   final _formKey = GlobalKey<FormState>();
   bool _isSaving = false;
+  late final Stream<QuerySnapshot<Map<String, dynamic>>> _ordersStream;
 
   @override
   void initState() {
     super.initState();
     _nameController = TextEditingController(text: widget.customer.name);
     _mobileController = TextEditingController(text: widget.customer.mobile);
+    _ordersStream = FirestoreStreamCache.instance.querySnapshots(
+      firstPageQuery(
+        FirebaseFirestore.instance
+            .collection('orders')
+            .where('shopId', isEqualTo: widget.shopId)
+            .where('customerId', isEqualTo: widget.customer.customerId)
+            .orderBy('createdAt', descending: true),
+        pageSize: FirestorePageSize.history,
+      ),
+      key:
+          'customer_orders_${widget.shopId}_${widget.customer.customerId}',
+    );
   }
 
   @override
@@ -58,7 +75,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
     return null;
   }
 
-  Future<void> _saveCustomer() async {
+  Future<void> _saveCustomer(BuildContext pageContext) async {
     if (!_formKey.currentState!.validate()) {
       return;
     }
@@ -71,19 +88,24 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
       await FirebaseFirestore.instance
           .collection('customers')
           .doc(widget.customer.customerId)
-          .update({
-        'name': _nameController.text.trim(),
-        'mobile': _mobileController.text.trim(),
-      });
+          .update(
+            FirestoreRuleSafeUpdate.customer(
+              widget.customer,
+              changes: {
+                'name': _nameController.text.trim(),
+                'mobile': _mobileController.text.trim(),
+              },
+            ),
+          );
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
           const SnackBar(content: Text('Customer updated successfully')),
         );
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
           SnackBar(content: Text('Error updating customer: $e')),
         );
       }
@@ -101,18 +123,12 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
-    final ordersQuery = FirebaseFirestore.instance
-        .collection('orders')
-        .where('shopId', isEqualTo: widget.shopId)
-        .where('customerId', isEqualTo: widget.customer.customerId)
-        .orderBy('createdAt', descending: true);
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('Customer Details'),
         actions: [
           TextButton.icon(
-            onPressed: _isSaving ? null : _saveCustomer,
+            onPressed: _isSaving ? null : () => _saveCustomer(context),
             icon: const Icon(Icons.save, size: 18),
             label: const Text('Save'),
           ),
@@ -199,8 +215,8 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
             ),
             const Divider(height: 1),
             Expanded(
-              child: StreamBuilder<QuerySnapshot>(
-                stream: ordersQuery.snapshots(),
+              child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                stream: _ordersStream,
                 builder: (context, snapshot) {
                   if (snapshot.connectionState == ConnectionState.waiting) {
                     return const Center(child: CircularProgressIndicator());
@@ -212,13 +228,10 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                   }
 
                   final docs = snapshot.data?.docs ?? [];
-                  final orders = docs
-                      .map(
-                        (doc) => OrderModel.fromMap(
-                          doc.data() as Map<String, dynamic>,
-                        ),
-                      )
-                      .toList();
+                  final orders = FirestoreParse.parseQueryDocs(
+                    docs,
+                    OrderModel.tryFromMap,
+                  );
 
                   if (orders.isEmpty) {
                     return Center(
@@ -241,8 +254,10 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Padding(
-                        padding:
-                            const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
@@ -355,4 +370,3 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
     );
   }
 }
-

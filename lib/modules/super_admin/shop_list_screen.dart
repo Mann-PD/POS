@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../data/models/shop_model.dart';
+import '../../routing/guarded_navigator.dart';
+import '../../routing/permission_gate.dart';
+import '../../routing/screen_permission.dart';
 import 'create_shop_screen.dart';
 import 'shop_detail_screen.dart';
 
@@ -13,7 +16,9 @@ class ShopListScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
-    return Scaffold(
+    return PermissionGate(
+      permission: ScreenPermission.shopList,
+      child: Scaffold(
       appBar: AppBar(
         title: const Text('Shops'),
         actions: [
@@ -21,11 +26,10 @@ class ShopListScreen extends StatelessWidget {
             icon: const Icon(Icons.add_business),
             tooltip: 'Create Shop',
             onPressed: () {
-              Navigator.push(
+              GuardedNavigator.push(
                 context,
-                MaterialPageRoute(
-                  builder: (context) => const CreateShopScreen(),
-                ),
+                permission: ScreenPermission.createShop,
+                page: const CreateShopScreen(),
               );
             },
           ),
@@ -53,11 +57,8 @@ class ShopListScreen extends StatelessWidget {
           }
 
           final shops = docs
-              .map(
-                (d) => ShopModel.fromMap(
-                  d.data() as Map<String, dynamic>,
-                ),
-              )
+              .map((d) => ShopModel.tryFromQueryDocument(d))
+              .whereType<ShopModel>()
               .toList();
 
           return ListView.builder(
@@ -112,12 +113,10 @@ class ShopListScreen extends StatelessWidget {
                   ),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () {
-                    Navigator.push(
+                    GuardedNavigator.push(
                       context,
-                      MaterialPageRoute(
-                        builder: (context) =>
-                            ShopDetailScreen(shop: shop),
-                      ),
+                      permission: ScreenPermission.shopDetail,
+                      page: ShopDetailScreen(shop: shop),
                     );
                   },
                 ),
@@ -128,16 +127,16 @@ class ShopListScreen extends StatelessWidget {
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () {
-          Navigator.push(
+          GuardedNavigator.push(
             context,
-            MaterialPageRoute(
-              builder: (context) => const CreateShopScreen(),
-            ),
+            permission: ScreenPermission.createShop,
+            page: const CreateShopScreen(),
           );
         },
         icon: const Icon(Icons.add),
         label: const Text('Create Shop'),
       ),
+    ),
     );
   }
 }

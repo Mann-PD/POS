@@ -56,13 +56,12 @@ class _InactivityWrapperState extends State<InactivityWrapper> {
         (route) => false,
       );
     }
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Session expired due to inactivity'),
-        ),
-      );
-    }
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Session expired due to inactivity'),
+      ),
+    );
   }
 
   void _handleUserInteraction([PointerEvent? _]) {

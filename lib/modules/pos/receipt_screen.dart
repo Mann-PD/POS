@@ -6,6 +6,9 @@ import 'package:printing/printing.dart';
 import '../../data/models/product_model.dart';
 import '../../core/services/storage_service.dart';
 import 'pos_home_screen.dart';
+import '../../routing/guarded_navigator.dart';
+import '../../routing/permission_gate.dart';
+import '../../routing/screen_permission.dart';
 
 /// Order Success & Receipt Screen - Display order confirmation and receipt
 class ReceiptScreen extends StatelessWidget {
@@ -57,10 +60,8 @@ class ReceiptScreen extends StatelessWidget {
             .doc(itemData['productId'] as String)
             .get();
 
-        if (productDoc.exists && productDoc.data() != null) {
-          final product = ProductModel.fromMap(
-            productDoc.data() as Map<String, dynamic>,
-          );
+        final product = ProductModel.tryFromDocument(productDoc);
+        if (product != null) {
           items.add({
             'product': product,
             'quantity':
@@ -197,6 +198,13 @@ class ReceiptScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return PermissionGate(
+      permission: ScreenPermission.receipt,
+      child: _buildReceipt(context),
+    );
+  }
+
+  Widget _buildReceipt(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
@@ -284,10 +292,9 @@ class ReceiptScreen extends StatelessWidget {
                                       .doc(itemData['productId'] as String)
                                       .get();
                                   
-                                  if (productDoc.exists) {
-                                    final product = ProductModel.fromMap(
-                                      productDoc.data() as Map<String, dynamic>,
-                                    );
+                                  final product =
+                                      ProductModel.tryFromDocument(productDoc);
+                                  if (product != null) {
                                     items.add({
                                       'product': product,
                                       'quantity': itemData['quantityOrWeight'] as double,
@@ -478,11 +485,10 @@ class ReceiptScreen extends StatelessWidget {
                 width: double.infinity,
                 child: FilledButton.icon(
                   onPressed: () {
-                    Navigator.of(context).pushAndRemoveUntil(
-                      MaterialPageRoute(
-                        builder: (context) => const PosHomeScreen(),
-                      ),
-                      (route) => false,
+                    GuardedNavigator.pushAndRemoveUntil(
+                      context,
+                      permission: ScreenPermission.posHome,
+                      page: const PosHomeScreen(),
                     );
                   },
                   icon: const Icon(Icons.add_shopping_cart),

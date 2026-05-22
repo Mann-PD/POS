@@ -3,6 +3,8 @@ import 'dart:math';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../core/observability/error_ui.dart';
+
 /// Manages per-device session identifiers for concurrent-login control.
 class SessionManager {
   static const _prefsKeyPrefix = 'active_session_';
@@ -31,8 +33,8 @@ class SessionManager {
       await callable.call(<String, dynamic>{
         'sessionId': sessionId,
       });
-    } catch (_) {
-      // Non-blocking; concurrent-login restriction is best-effort.
+    } catch (e, st) {
+      reportCatch(e, stackTrace: st, tag: 'SessionManager.registerActiveSession');
     }
   }
 

@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../routing/guarded_navigator.dart';
+import '../../routing/screen_permission.dart';
 import '../authentication/auth_controller.dart';
 import '../admin/audit_logs_screen.dart';
 import '../admin/settings_screen.dart';
@@ -51,11 +53,10 @@ class SuperAdminDashboard extends StatelessWidget {
               const SizedBox(height: 48),
               FilledButton.icon(
                 onPressed: () {
-                  Navigator.push(
+                  GuardedNavigator.push(
                     context,
-                    MaterialPageRoute(
-                      builder: (context) => const CreateShopScreen(),
-                    ),
+                    permission: ScreenPermission.createShop,
+                    page: const CreateShopScreen(),
                   );
                 },
                 icon: const Icon(Icons.store),
@@ -78,11 +79,10 @@ class SuperAdminDashboard extends StatelessWidget {
               const SizedBox(height: 16),
               FilledButton.icon(
                 onPressed: () {
-                  Navigator.push(
+                  GuardedNavigator.push(
                     context,
-                    MaterialPageRoute(
-                      builder: (context) => const ShopListScreen(),
-                    ),
+                    permission: ScreenPermission.shopList,
+                    page: const ShopListScreen(),
                   );
                 },
                 icon: const Icon(Icons.store_mall_directory),
@@ -105,11 +105,10 @@ class SuperAdminDashboard extends StatelessWidget {
               const SizedBox(height: 16),
               FilledButton.icon(
                 onPressed: () {
-                  Navigator.push(
+                  GuardedNavigator.push(
                     context,
-                    MaterialPageRoute(
-                      builder: (context) => const UserManagementScreen(),
-                    ),
+                    permission: ScreenPermission.userManagement,
+                    page: const UserManagementScreen(),
                   );
                 },
                 icon: const Icon(Icons.people),
@@ -132,11 +131,10 @@ class SuperAdminDashboard extends StatelessWidget {
               const SizedBox(height: 16),
               FilledButton.icon(
                 onPressed: () {
-                  Navigator.push(
+                  GuardedNavigator.push(
                     context,
-                    MaterialPageRoute(
-                      builder: (context) => GlobalReportsScreen(),
-                    ),
+                    permission: ScreenPermission.globalReports,
+                    page: GlobalReportsScreen(),
                   );
                 },
                 icon: const Icon(Icons.public),
@@ -159,11 +157,10 @@ class SuperAdminDashboard extends StatelessWidget {
               const SizedBox(height: 16),
               FilledButton.icon(
                 onPressed: () {
-                  Navigator.push(
+                  GuardedNavigator.push(
                     context,
-                    MaterialPageRoute(
-                      builder: (context) => const AuditLogsScreen(),
-                    ),
+                    permission: ScreenPermission.auditLogs,
+                    page: const AuditLogsScreen(),
                   );
                 },
                 icon: const Icon(Icons.history),
@@ -186,11 +183,10 @@ class SuperAdminDashboard extends StatelessWidget {
               const SizedBox(height: 16),
               FilledButton.icon(
                 onPressed: () {
-                  Navigator.push(
+                  GuardedNavigator.push(
                     context,
-                    MaterialPageRoute(
-                      builder: (context) => const SettingsScreen(),
-                    ),
+                    permission: ScreenPermission.systemSettings,
+                    page: const SettingsScreen(),
                   );
                 },
                 icon: const Icon(Icons.settings),

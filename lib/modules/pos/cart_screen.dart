@@ -3,6 +3,9 @@ import 'package:get/get.dart';
 import 'controllers/cart_controller.dart';
 import 'quantity_selection_dialog.dart';
 import 'customer_screen.dart';
+import '../../routing/guarded_navigator.dart';
+import '../../routing/permission_gate.dart';
+import '../../routing/screen_permission.dart';
 
 /// Cart Summary Screen - Review and adjust cart items before checkout
 class CartScreen extends StatelessWidget {
@@ -10,6 +13,13 @@ class CartScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return PermissionGate(
+      permission: ScreenPermission.cart,
+      child: _buildCart(context),
+    );
+  }
+
+  Widget _buildCart(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
@@ -158,10 +168,10 @@ class CartScreen extends StatelessWidget {
                     width: double.infinity,
                     child: FilledButton.icon(
                       onPressed: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (context) => const CustomerScreen(),
-                          ),
+                        GuardedNavigator.push(
+                          context,
+                          permission: ScreenPermission.customerSelect,
+                          page: const CustomerScreen(),
                         );
                       },
                       icon: const Icon(Icons.arrow_forward),
@@ -257,8 +267,9 @@ class _CartItemCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  // Quantity controls
+                  // Quantity controls (compact for narrow cart column on phones)
                   Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       IconButton(
                         icon: const Icon(Icons.remove_circle_outline),
@@ -270,17 +281,24 @@ class _CartItemCard extends StatelessWidget {
                                     (_isWeightBased ? 0.1 : 1),
                               ),
                         iconSize: 20,
+                        visualDensity: VisualDensity.compact,
                         padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        '${item.quantityOrWeight.toStringAsFixed(_isWeightBased ? 2 : 0)} ${_getMeasurementUnit()}',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
+                        constraints: const BoxConstraints(
+                          minWidth: 32,
+                          minHeight: 32,
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: Text(
+                          '${item.quantityOrWeight.toStringAsFixed(_isWeightBased ? 2 : 0)} ${_getMeasurementUnit()}',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
                       IconButton(
                         icon: const Icon(Icons.add_circle_outline),
                         onPressed: item.quantityOrWeight >= item.product.stock
@@ -290,8 +308,12 @@ class _CartItemCard extends StatelessWidget {
                                     (_isWeightBased ? 0.1 : 1),
                               ),
                         iconSize: 20,
+                        visualDensity: VisualDensity.compact,
                         padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
+                        constraints: const BoxConstraints(
+                          minWidth: 32,
+                          minHeight: 32,
+                        ),
                       ),
                       const SizedBox(width: 8),
                       IconButton(

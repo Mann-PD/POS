@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:get/get.dart';
 import '../../../data/models/expense_model.dart';
+import '../../../widgets/firestore_paginated_list.dart';
 import '../../../data/models/user_model.dart';
 import 'expense_controller.dart';
 
@@ -33,15 +34,18 @@ class _ExpenseScreenState extends State<ExpenseScreen> {
   @override
   void initState() {
     super.initState();
-    _loadUserData();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _loadUserData(context);
+    });
   }
 
-  Future<void> _loadUserData() async {
+  Future<void> _loadUserData(BuildContext pageContext) async {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
-        if (mounted) {
-          Navigator.of(context).pop();
+        if (pageContext.mounted) {
+          Navigator.of(pageContext).pop();
         }
         return;
       }
@@ -52,9 +56,9 @@ class _ExpenseScreenState extends State<ExpenseScreen> {
           .get();
 
       if (userDoc.exists) {
-        final userData = UserModel.fromMap(
-          userDoc.data() as Map<String, dynamic>,
-        );
+        final userData = UserModel.tryFromDocument(userDoc);
+        if (userData == null) return;
+        if (!mounted) return;
         setState(() {
           _shopId = userData.shopId;
           _adminUid = user.uid;
@@ -63,11 +67,12 @@ class _ExpenseScreenState extends State<ExpenseScreen> {
         _controller.setLoading(false);
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
           SnackBar(content: Text('Error loading user data: $e')),
         );
       }
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
       });
@@ -75,7 +80,8 @@ class _ExpenseScreenState extends State<ExpenseScreen> {
     }
   }
 
-  Future<void> _saveExpense({
+  Future<void> _saveExpense(
+    BuildContext pageContext, {
     required String title,
     required String category,
     required double amount,
@@ -83,9 +89,11 @@ class _ExpenseScreenState extends State<ExpenseScreen> {
     required DateTime expenseDate,
   }) async {
     if (_shopId == null || _adminUid == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Shop ID or Admin UID not found')),
-      );
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
+          const SnackBar(content: Text('Shop ID or Admin UID not found')),
+        );
+      }
       return;
     }
 
@@ -102,18 +110,18 @@ class _ExpenseScreenState extends State<ExpenseScreen> {
         'description': desc,
       });
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
           const SnackBar(
             content: Text('Expense saved successfully'),
             backgroundColor: Colors.green,
           ),
         );
-        Navigator.of(context).pop(); // Close form bottom sheet
+        Navigator.of(pageContext).pop(); // Close form bottom sheet
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
           SnackBar(
             content: Text('Error saving expense: $e'),
             backgroundColor: Colors.red,
@@ -125,16 +133,30 @@ class _ExpenseScreenState extends State<ExpenseScreen> {
     }
   }
 
-  void _showExpenseForm() {
+  void _showExpenseForm(BuildContext pageContext) {
     showModalBottomSheet(
-      context: context,
+      context: pageContext,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) => _ExpenseFormBottomSheet(
         categories: _categories,
-        onSave: _saveExpense,
+        onSave: ({
+          required String title,
+          required String category,
+          required double amount,
+          String? description,
+          required DateTime expenseDate,
+        }) =>
+            _saveExpense(
+          pageContext,
+          title: title,
+          category: category,
+          amount: amount,
+          description: description,
+          expenseDate: expenseDate,
+        ),
       ),
     );
   }
@@ -154,7 +176,7 @@ class _ExpenseScreenState extends State<ExpenseScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.add),
-            onPressed: _showExpenseForm,
+            onPressed: () => _showExpenseForm(context),
             tooltip: 'Add Expense',
           ),
         ],
@@ -185,7 +207,7 @@ class _ExpenseScreenState extends State<ExpenseScreen> {
                       children: [
                         Expanded(
                           child: OutlinedButton.icon(
-                            onPressed: () => _showDateRangePicker(),
+                            onPressed: () => _showDateRangePicker(context),
                             icon: const Icon(Icons.calendar_today, size: 18),
                             label: Text(
                               _controller.startDate.value != null
@@ -197,7 +219,7 @@ class _ExpenseScreenState extends State<ExpenseScreen> {
                         const SizedBox(width: 8),
                         Expanded(
                           child: OutlinedButton.icon(
-                            onPressed: () => _showDateRangePicker(),
+                            onPressed: () => _showDateRangePicker(context),
                             icon: const Icon(Icons.calendar_today, size: 18),
                             label: Text(
                               _controller.endDate.value != null
@@ -219,134 +241,80 @@ class _ExpenseScreenState extends State<ExpenseScreen> {
             ),
           ),
 
-          // Expenses list
           Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('expenses')
-                  .where('shopId', isEqualTo: _shopId)
-                  .orderBy('createdAt', descending: true)
-                  .snapshots(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
-                if (snapshot.hasError) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.error_outline,
-                          size: 64,
-                          color: Theme.of(context).colorScheme.error,
-                        ),
-                        const SizedBox(height: 16),
-                        Text('Error loading expenses: ${snapshot.error}'),
-                      ],
-                    ),
-                  );
-                }
-
-                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.account_balance_wallet_outlined,
-                          size: 64,
-                          color: Theme.of(context).colorScheme.outline,
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          'No expenses found',
-                          style: Theme.of(context).textTheme.titleLarge,
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Tap + to add your first expense',
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                color: Theme.of(context).colorScheme.outline,
-                              ),
-                        ),
-                      ],
-                    ),
-                  );
-                }
-
-                final allExpenses = snapshot.data!.docs
-                    .map((doc) {
-                      final data = doc.data() as Map<String, dynamic>;
-                      return {
-                        'expense': ExpenseModel.fromMap(data),
-                        'title': data['title'] as String? ?? data['description'] as String? ?? 'Expense',
-                        'category': data['category'] as String? ?? 'Other',
-                      };
-                    })
-                    .toList();
-
-                return Obx(() {
-                  var filteredExpenses = allExpenses;
-
-                  // Filter by category
-                  if (_controller.selectedCategory.value != 'all') {
-                    filteredExpenses = filteredExpenses
-                        .where((item) =>
-                            (item['category'] as String).toLowerCase() ==
-                            _controller.selectedCategory.value)
-                        .toList();
-                  }
-
-                  // Filter by date range
-                  if (_controller.startDate.value != null) {
-                    filteredExpenses = filteredExpenses.where((item) {
-                      final expense = item['expense'] as ExpenseModel;
-                      return expense.createdAt
-                          .isAfter(_controller.startDate.value!.subtract(
-                            const Duration(days: 1),
-                          ));
-                    }).toList();
-                  }
-
-                  if (_controller.endDate.value != null) {
-                    filteredExpenses = filteredExpenses.where((item) {
-                      final expense = item['expense'] as ExpenseModel;
-                      return expense.createdAt
-                          .isBefore(_controller.endDate.value!.add(
-                            const Duration(days: 1),
-                          ));
-                    }).toList();
-                  }
-
-                  if (filteredExpenses.isEmpty) {
-                    return Center(
-                      child: Text(
-                        'No expenses match your filters',
-                        style: Theme.of(context).textTheme.bodyLarge,
-                      ),
+            child: Obx(() {
+              final start = _controller.startDate.value;
+              final end = _controller.endDate.value;
+              return FirestorePaginatedList<ExpenseModel>(
+                key: ValueKey('expenses_${start?.millisecondsSinceEpoch}_${end?.millisecondsSinceEpoch}'),
+                cacheKey:
+                    'expenses_${_shopId}_${start?.millisecondsSinceEpoch}_${end?.millisecondsSinceEpoch}',
+                queryBuilder: () {
+                  Query<Map<String, dynamic>> q = FirebaseFirestore.instance
+                      .collection('expenses')
+                      .where('shopId', isEqualTo: _shopId);
+                  if (start != null) {
+                    q = q.where(
+                      'createdAt',
+                      isGreaterThanOrEqualTo: Timestamp.fromDate(start),
                     );
                   }
-
-                  return ListView.builder(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: filteredExpenses.length,
-                    itemBuilder: (context, index) {
-                      final item = filteredExpenses[index];
-                      final expense = item['expense'] as ExpenseModel;
-                      final title = item['title'] as String;
-                      final category = item['category'] as String;
-                      return _buildExpenseCard(context, expense, title, category);
-                    },
+                  if (end != null) {
+                    final endDay = DateTime(
+                      end.year,
+                      end.month,
+                      end.day,
+                      23,
+                      59,
+                      59,
+                    );
+                    q = q.where(
+                      'createdAt',
+                      isLessThanOrEqualTo: Timestamp.fromDate(endDay),
+                    );
+                  }
+                  return q.orderBy('createdAt', descending: true);
+                },
+                parse: (data, _) => ExpenseModel.tryFromMap(data),
+                itemKey: (e) => e.expenseId,
+                filterItems: (items) {
+                  final cat = _controller.selectedCategory.value;
+                  if (cat == 'all') return items;
+                  return items
+                      .where(
+                        (e) => _expenseCategoryLabel(e).toLowerCase() == cat,
+                      )
+                      .toList();
+                },
+                emptyBuilder: (context) => Center(
+                  child: Text(
+                    'No expenses match your filters',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                ),
+                itemBuilder: (context, expense) {
+                  final data = expense;
+                  final title = data.description.isNotEmpty
+                      ? data.description
+                      : 'Expense';
+                  return _buildExpenseCard(
+                    context,
+                    data,
+                    title,
+                    _expenseCategoryLabel(data),
                   );
-                });
-              },
-            ),
+                },
+              );
+            }),
           ),
         ],
       ),
     );
+  }
+
+  String _expenseCategoryLabel(ExpenseModel e) {
+    if (e.category.isNotEmpty) return e.category;
+    return 'Other';
   }
 
   Widget _buildCategoryChip(String value, String label) {
@@ -364,9 +332,9 @@ class _ExpenseScreenState extends State<ExpenseScreen> {
         ));
   }
 
-  Future<void> _showDateRangePicker() async {
+  Future<void> _showDateRangePicker(BuildContext pageContext) async {
     final DateTimeRange? picked = await showDateRangePicker(
-      context: context,
+      context: pageContext,
       firstDate: DateTime(2020),
       lastDate: DateTime.now(),
       initialDateRange: _controller.startDate.value != null &&
@@ -450,7 +418,7 @@ class _ExpenseScreenState extends State<ExpenseScreen> {
 /// Expense Form Bottom Sheet
 class _ExpenseFormBottomSheet extends StatefulWidget {
   final List<String> categories;
-  final Function({
+  final Future<void> Function({
     required String title,
     required String category,
     required double amount,
@@ -495,6 +463,7 @@ class _ExpenseFormBottomSheetState extends State<_ExpenseFormBottomSheet> {
     );
 
     if (picked != null) {
+      if (!mounted) return;
       setState(() {
         _selectedDate = picked;
       });

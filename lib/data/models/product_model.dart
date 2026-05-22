@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../core/firestore/firestore_parse.dart';
 
 class ProductModel {
   final String productId;
@@ -34,27 +35,50 @@ class ProductModel {
   bool get isAvailable => isActive && stock > 0;
 
   /// Canonical product status: Active, Inactive (matches backend)
-  static String _normalizeProductStatus(String? value) {
-    if (value == null || value.isEmpty) return 'Active';
-    final lower = value.toLowerCase().trim();
+  static String _normalizeProductStatus(dynamic value) {
+    final s = FirestoreParse.stringField(value, fallback: 'Active');
+    if (s.isEmpty) return 'Active';
+    final lower = s.toLowerCase().trim();
     if (lower == 'active') return 'Active';
     if (lower == 'inactive' || lower == 'disabled') return 'Inactive';
-    return value;
+    return s;
   }
 
   factory ProductModel.fromMap(Map<String, dynamic> map) {
     return ProductModel(
-      productId: map['productId'] as String? ?? '',
-      shopId: map['shopId'] as String? ?? '',
-      name: map['name'] as String? ?? '',
-      categoryId: map['categoryId'] as String? ?? '',
-      price: (map['price'] as num?)?.toDouble() ?? 0,
-      measurementType: map['measurementType'] as String? ?? 'piece',
-      stock: (map['stock'] as num?)?.toDouble() ?? 0,
-      status: _normalizeProductStatus(map['status'] as String?),
-      createdAt: map['createdAt'] is Timestamp
-          ? (map['createdAt'] as Timestamp).toDate()
-          : DateTime.now(),
+      productId: FirestoreParse.stringField(map['productId']),
+      shopId: FirestoreParse.stringField(map['shopId']),
+      name: FirestoreParse.stringField(map['name']),
+      categoryId: FirestoreParse.stringField(map['categoryId']),
+      price: FirestoreParse.doubleField(map['price']),
+      measurementType:
+          FirestoreParse.stringField(map['measurementType'], fallback: 'piece'),
+      stock: FirestoreParse.doubleField(map['stock']),
+      status: _normalizeProductStatus(map['status']),
+      createdAt: FirestoreParse.dateTimeField(map['createdAt']),
+    );
+  }
+
+  static ProductModel? tryFromMap(Map<String, dynamic>? map) {
+    if (map == null) return null;
+    final product = ProductModel.fromMap(map);
+    if (product.productId.isEmpty && product.shopId.isEmpty) return null;
+    return product;
+  }
+
+  static ProductModel? tryFromDocument(DocumentSnapshot doc) {
+    return FirestoreParse.tryParse(
+      doc,
+      ProductModel.fromMap,
+      validate: (p) => p.productId.isNotEmpty || p.name.isNotEmpty,
+    );
+  }
+
+  static ProductModel? tryFromQueryDocument(QueryDocumentSnapshot doc) {
+    return FirestoreParse.tryParseQuery(
+      doc,
+      ProductModel.fromMap,
+      validate: (p) => p.productId.isNotEmpty || p.name.isNotEmpty,
     );
   }
 

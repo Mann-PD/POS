@@ -2,9 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:get/get.dart';
+import '../../../core/firestore/firestore_rule_safe_update.dart';
 import '../../../data/models/user_model.dart';
+import '../../../widgets/firestore_paginated_list.dart';
 import '../../../core/rbac/role_constants.dart';
 import 'employee_controller.dart';
+import '../../../routing/guarded_navigator.dart';
+import '../../../routing/screen_permission.dart';
 import 'employee_form_screen.dart';
 
 /// Employee List Screen - Admin view of all employees
@@ -24,15 +28,18 @@ class _EmployeeListScreenState extends State<EmployeeListScreen> {
   @override
   void initState() {
     super.initState();
-    _loadUserData();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _loadUserData(context);
+    });
   }
 
-  Future<void> _loadUserData() async {
+  Future<void> _loadUserData(BuildContext pageContext) async {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
-        if (mounted) {
-          Navigator.of(context).pop();
+        if (pageContext.mounted) {
+          Navigator.of(pageContext).pop();
         }
         return;
       }
@@ -43,9 +50,9 @@ class _EmployeeListScreenState extends State<EmployeeListScreen> {
           .get();
 
       if (userDoc.exists) {
-        final userData = UserModel.fromMap(
-          userDoc.data() as Map<String, dynamic>,
-        );
+        final userData = UserModel.tryFromDocument(userDoc);
+        if (userData == null) return;
+        if (!mounted) return;
         setState(() {
           _shopId = userData.shopId;
           _isLoading = false;
@@ -53,11 +60,12 @@ class _EmployeeListScreenState extends State<EmployeeListScreen> {
         _controller.setLoading(false);
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error loading user data: $e')));
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
+          SnackBar(content: Text('Error loading user data: $e')),
+        );
       }
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
       });
@@ -65,18 +73,26 @@ class _EmployeeListScreenState extends State<EmployeeListScreen> {
     }
   }
 
-  Future<void> _toggleEmployeeStatus(UserModel employee) async {
+  Future<void> _toggleEmployeeStatus(
+    BuildContext pageContext,
+    UserModel employee,
+  ) async {
     try {
       _controller.setLoading(true);
       await FirebaseFirestore.instance
           .collection('users')
           .doc(employee.userId)
-          .update({
-            'status': employee.status == 'Active' ? 'Inactive' : 'Active',
-          });
+          .update(
+            FirestoreRuleSafeUpdate.user(
+              employee,
+              changes: {
+                'status': employee.status == 'Active' ? 'Inactive' : 'Active',
+              },
+            ),
+          );
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
           SnackBar(
             content: Text(
               'Employee ${employee.status == 'Active' ? 'deactivated' : 'activated'}',
@@ -85,10 +101,10 @@ class _EmployeeListScreenState extends State<EmployeeListScreen> {
         );
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error updating employee: $e')));
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
+          SnackBar(content: Text('Error updating employee: $e')),
+        );
       }
     } finally {
       _controller.setLoading(false);
@@ -111,11 +127,10 @@ class _EmployeeListScreenState extends State<EmployeeListScreen> {
           IconButton(
             icon: const Icon(Icons.add),
             onPressed: () {
-              Navigator.push(
+              GuardedNavigator.push(
                 context,
-                MaterialPageRoute(
-                  builder: (context) => const EmployeeFormScreen(),
-                ),
+                permission: ScreenPermission.employeeForm,
+                page: const EmployeeFormScreen(),
               );
             },
             tooltip: 'Add Employee',
@@ -165,123 +180,46 @@ class _EmployeeListScreenState extends State<EmployeeListScreen> {
 
           const SizedBox(height: 8),
 
-          // Employees list
           Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('users')
-                  .where('shopId', isEqualTo: _shopId)
-                  .where('role', isEqualTo: RoleConstants.employee)
-                  .orderBy('name')
-                  .snapshots(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
-                if (snapshot.hasError) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.error_outline,
-                          size: 64,
-                          color: Theme.of(context).colorScheme.error,
-                        ),
-                        const SizedBox(height: 16),
-                        Text('Error loading employees: ${snapshot.error}'),
-                      ],
-                    ),
-                  );
-                }
-
-                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.people_outline,
-                          size: 64,
-                          color: Theme.of(context).colorScheme.outline,
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          'No employees found',
-                          style: Theme.of(context).textTheme.titleLarge,
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Tap + to add your first employee',
-                          style: Theme.of(context).textTheme.bodyMedium
-                              ?.copyWith(
-                                color: Theme.of(context).colorScheme.outline,
-                              ),
-                        ),
-                      ],
-                    ),
-                  );
-                }
-
-                final allEmployees = snapshot.data!.docs
-                    .map(
-                      (doc) =>
-                          UserModel.fromMap(doc.data() as Map<String, dynamic>),
-                    )
-                    .toList();
-
-                return Obx(() {
-                  var filteredEmployees = allEmployees;
-
-                  // Filter by search query
-                  if (_controller.searchQuery.value.isNotEmpty) {
-                    filteredEmployees = filteredEmployees
+            child: Obx(
+              () => FirestorePaginatedList<UserModel>(
+                cacheKey: 'employees_shop_$_shopId',
+                queryBuilder: () => FirebaseFirestore.instance
+                    .collection('users')
+                    .where('shopId', isEqualTo: _shopId)
+                    .where('role', isEqualTo: RoleConstants.employee)
+                    .orderBy('name'),
+                parse: (data, _) => UserModel.tryFromMap(data),
+                itemKey: (u) => u.userId,
+                filterItems: (items) {
+                  var filtered = items;
+                  final q = _controller.searchQuery.value.trim().toLowerCase();
+                  if (q.isNotEmpty) {
+                    filtered = filtered
                         .where(
-                          (employee) =>
-                              employee.name.toLowerCase().contains(
-                                _controller.searchQuery.value.toLowerCase(),
-                              ) ||
-                              employee.email.toLowerCase().contains(
-                                _controller.searchQuery.value.toLowerCase(),
-                              ) ||
-                              employee.phone.contains(
-                                _controller.searchQuery.value,
-                              ),
+                          (e) =>
+                              e.name.toLowerCase().contains(q) ||
+                              e.email.toLowerCase().contains(q) ||
+                              e.phone.contains(_controller.searchQuery.value),
                         )
                         .toList();
                   }
-
-                  // Filter by status
-                  if (_controller.selectedFilter.value == 'Active') {
-                    filteredEmployees = filteredEmployees
-                        .where((employee) => employee.status == 'Active')
-                        .toList();
-                  } else if (_controller.selectedFilter.value == 'Inactive') {
-                    filteredEmployees = filteredEmployees
-                        .where((employee) => employee.status == 'Inactive')
-                        .toList();
+                  final f = _controller.selectedFilter.value;
+                  if (f == 'Active') {
+                    filtered =
+                        filtered.where((e) => e.status == 'Active').toList();
+                  } else if (f == 'Inactive') {
+                    filtered =
+                        filtered.where((e) => e.status == 'Inactive').toList();
                   }
-
-                  if (filteredEmployees.isEmpty) {
-                    return Center(
-                      child: Text(
-                        'No employees match your filters',
-                        style: Theme.of(context).textTheme.bodyLarge,
-                      ),
-                    );
-                  }
-
-                  return ListView.builder(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: filteredEmployees.length,
-                    itemBuilder: (context, index) {
-                      final employee = filteredEmployees[index];
-                      return _buildEmployeeCard(context, employee);
-                    },
-                  );
-                });
-              },
+                  return filtered;
+                },
+                emptyBuilder: (context) => const Center(
+                  child: Text('No employees match your filters'),
+                ),
+                itemBuilder: (context, employee) =>
+                    _buildEmployeeCard(context, employee),
+              ),
             ),
           ),
         ],
@@ -355,7 +293,7 @@ class _EmployeeListScreenState extends State<EmployeeListScreen> {
         trailing: PopupMenuButton<String>(
           onSelected: (value) {
             if (value == 'toggle') {
-              _toggleEmployeeStatus(employee);
+              _toggleEmployeeStatus(context, employee);
             }
           },
           itemBuilder: (context) => [

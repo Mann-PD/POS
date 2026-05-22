@@ -22,21 +22,22 @@ class CategoryChip extends StatelessWidget {
       label: Text(label),
       selected: isSelected,
       onSelected: (_) => onTap(),
+      showCheckmark: false,
       selectedColor: colorScheme.primaryContainer,
-      checkmarkColor: colorScheme.onPrimaryContainer,
+      backgroundColor: colorScheme.surface,
       labelStyle: TextStyle(
         color: isSelected
             ? colorScheme.onPrimaryContainer
-            : colorScheme.onSurface,
-        fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+            : colorScheme.onSurfaceVariant,
+        fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+        fontSize: 13,
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      visualDensity: VisualDensity.compact,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(24),
         side: BorderSide(
-          color: isSelected
-              ? colorScheme.primary
-              : colorScheme.outline.withValues(alpha: 0.3),
+          color: isSelected ? colorScheme.primary : colorScheme.outlineVariant,
           width: isSelected ? 1.5 : 1,
         ),
       ),

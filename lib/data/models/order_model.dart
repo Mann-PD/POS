@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../core/firestore/firestore_parse.dart';
 
 class OrderModel {
   final String orderId; // immutable
@@ -28,31 +29,42 @@ class OrderModel {
   });
 
   /// Whether this order is completed and locked
-  bool get isCompleted =>
-      orderStatus.toLowerCase() == 'locked';
+  bool get isCompleted => orderStatus.toLowerCase() == 'locked';
 
   /// Whether this order was cancelled
-  bool get isCancelled =>
-      orderStatus.toLowerCase() == 'cancelled';
+  bool get isCancelled => orderStatus.toLowerCase() == 'cancelled';
 
   /// Whether this order is still pending (can be cancelled)
   bool get isPending => orderStatus.toLowerCase() == 'pending';
 
   factory OrderModel.fromMap(Map<String, dynamic> map) {
     return OrderModel(
-      orderId: map['orderId'] as String? ?? '',
-      shopId: map['shopId'] as String? ?? '',
-      customerId: map['customerId'] as String? ?? '',
-      customerName: map['customerName'] as String? ?? '',
-      employeeId: map['employeeId'] as String? ?? '',
-      employeeName: map['employeeName'] as String? ?? '',
-      totalAmount: (map['totalAmount'] as num?)?.toDouble() ?? 0,
-      paymentMethod: map['paymentMethod'] as String? ?? '',
-      paymentStatus: map['paymentStatus'] as String? ?? '',
-      orderStatus: map['orderStatus'] as String? ?? '',
-      createdAt: map['createdAt'] is Timestamp
-          ? (map['createdAt'] as Timestamp).toDate()
-          : DateTime.now(),
+      orderId: FirestoreParse.stringField(map['orderId']),
+      shopId: FirestoreParse.stringField(map['shopId']),
+      customerId: FirestoreParse.stringField(map['customerId']),
+      customerName: FirestoreParse.stringField(map['customerName']),
+      employeeId: FirestoreParse.stringField(map['employeeId']),
+      employeeName: FirestoreParse.stringField(map['employeeName']),
+      totalAmount: FirestoreParse.doubleField(map['totalAmount']),
+      paymentMethod: FirestoreParse.stringField(map['paymentMethod']),
+      paymentStatus: FirestoreParse.stringField(map['paymentStatus']),
+      orderStatus: FirestoreParse.stringField(map['orderStatus']),
+      createdAt: FirestoreParse.dateTimeField(map['createdAt']),
+    );
+  }
+
+  static OrderModel? tryFromMap(Map<String, dynamic>? map) {
+    if (map == null) return null;
+    final order = OrderModel.fromMap(map);
+    if (order.orderId.isEmpty) return null;
+    return order;
+  }
+
+  static OrderModel? tryFromQueryDocument(QueryDocumentSnapshot doc) {
+    return FirestoreParse.tryParseQuery(
+      doc,
+      OrderModel.fromMap,
+      validate: (o) => o.orderId.isNotEmpty,
     );
   }
 

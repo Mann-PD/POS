@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../data/models/customer_model.dart';
+import '../../../widgets/firestore_paginated_list.dart';
 import '../../../data/models/user_model.dart';
+import '../../../routing/guarded_navigator.dart';
+import '../../../routing/screen_permission.dart';
 import 'customer_detail_screen.dart';
 
 /// Customer List Screen - Admin view of all customers
@@ -29,9 +32,8 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
-        if (mounted) {
-          Navigator.of(context).pop();
-        }
+        if (!context.mounted) return;
+        Navigator.of(context).pop();
         return;
       }
 
@@ -39,40 +41,32 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
           await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
 
       if (userDoc.exists) {
-        final userData =
-            UserModel.fromMap(userDoc.data() as Map<String, dynamic>);
+        final userData = UserModel.tryFromDocument(userDoc);
+        if (userData == null) {
+          if (!mounted) return;
+          setState(() => _isLoading = false);
+          return;
+        }
+        if (!mounted) return;
         setState(() {
           _shopId = userData.shopId;
           _isLoading = false;
         });
       } else {
+        if (!mounted) return;
         setState(() {
           _isLoading = false;
         });
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading user data: $e')),
-        );
-      }
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
       });
-    }
-  }
-
-  Future<int> _getOrderCount(String customerId) async {
-    if (_shopId == null || _shopId!.isEmpty) return 0;
-    try {
-      final snap = await FirebaseFirestore.instance
-          .collection('orders')
-          .where('shopId', isEqualTo: _shopId)
-          .where('customerId', isEqualTo: customerId)
-          .get();
-      return snap.size;
-    } catch (_) {
-      return 0;
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error loading user data: $e')),
+      );
     }
   }
 
@@ -127,92 +121,47 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
             ),
           ),
 
-          // Customers list
           Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
+            child: FirestorePaginatedList<CustomerModel>(
+              cacheKey: 'customers_shop_$_shopId',
+              queryBuilder: () => FirebaseFirestore.instance
                   .collection('customers')
                   .where('shopId', isEqualTo: _shopId)
-                  .orderBy('name')
-                  .snapshots(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
-                if (snapshot.hasError) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.error_outline,
-                          size: 64,
-                          color: Theme.of(context).colorScheme.error,
-                        ),
-                        const SizedBox(height: 16),
-                        Text('Error loading customers: ${snapshot.error}'),
-                      ],
-                    ),
-                  );
-                }
-
-                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.people_alt_outlined,
-                          size: 64,
-                          color: Theme.of(context).colorScheme.outline,
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          'No customers found',
-                          style: Theme.of(context).textTheme.titleLarge,
-                        ),
-                      ],
-                    ),
-                  );
-                }
-
-                final allCustomers = snapshot.data!.docs
-                    .map(
-                      (doc) => CustomerModel.fromMap(
-                        doc.data() as Map<String, dynamic>,
-                      ),
+                  .orderBy('name'),
+              parse: (data, _) => CustomerModel.tryFromMap(data),
+              itemKey: (c) => c.customerId,
+              filterItems: (items) {
+                if (_searchQuery.isEmpty) return items;
+                final q = _searchQuery.toLowerCase();
+                return items
+                    .where(
+                      (c) =>
+                          c.name.toLowerCase().contains(q) ||
+                          c.mobile.contains(_searchQuery),
                     )
                     .toList();
-
-                List<CustomerModel> filtered = allCustomers;
-                if (_searchQuery.isNotEmpty) {
-                  final q = _searchQuery.toLowerCase();
-                  filtered = allCustomers.where((c) {
-                    final name = c.name.toLowerCase();
-                    final mobile = c.mobile;
-                    return name.contains(q) || mobile.contains(_searchQuery);
-                  }).toList();
-                }
-
-                if (filtered.isEmpty) {
-                  return Center(
-                    child: Text(
-                      'No customers match your search',
-                      style: Theme.of(context).textTheme.bodyLarge,
-                    ),
-                  );
-                }
-
-                return ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: filtered.length,
-                  itemBuilder: (context, index) {
-                    final customer = filtered[index];
-                    return _buildCustomerCard(context, customer);
-                  },
-                );
               },
+              emptyBuilder: (context) => Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.people_alt_outlined,
+                      size: 64,
+                      color: Theme.of(context).colorScheme.outline,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      _searchQuery.isEmpty
+                          ? 'No customers found'
+                          : 'No customers match your search',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                  ],
+                ),
+              ),
+              itemBuilder: (context, customer) =>
+                  _buildCustomerCard(context, customer),
             ),
           ),
         ],
@@ -240,27 +189,17 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
             const SizedBox(height: 4),
             Text('Mobile: ${customer.mobile}'),
             const SizedBox(height: 4),
-            FutureBuilder<int>(
-              future: _getOrderCount(customer.customerId),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Text('Total orders: ...');
-                }
-                final count = snapshot.data ?? 0;
-                return Text('Total orders: $count');
-              },
-            ),
+            const Text('Open for order history'),
           ],
         ),
         trailing: const Icon(Icons.chevron_right),
         onTap: () {
-          Navigator.push(
+          GuardedNavigator.push(
             context,
-            MaterialPageRoute(
-              builder: (context) => CustomerDetailScreen(
-                customer: customer,
-                shopId: _shopId!,
-              ),
+            permission: ScreenPermission.customerDetail,
+            page: CustomerDetailScreen(
+              customer: customer,
+              shopId: _shopId!,
             ),
           );
         },

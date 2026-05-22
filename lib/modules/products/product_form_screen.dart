@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../core/firestore/firestore_rule_safe_update.dart';
 import '../../data/models/product_model.dart';
 import '../../data/models/user_model.dart';
 
@@ -37,15 +38,18 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       _stockController.text = widget.product!.stock.toString();
       _measurementType = widget.product!.measurementType;
     }
-    _loadUserData();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _loadUserData(context);
+    });
   }
 
-  Future<void> _loadUserData() async {
+  Future<void> _loadUserData(BuildContext pageContext) async {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
-        if (mounted) {
-          Navigator.of(context).pop();
+        if (pageContext.mounted) {
+          Navigator.of(pageContext).pop();
         }
         return;
       }
@@ -56,31 +60,33 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
           .get();
 
       if (userDoc.exists) {
-        final userData = UserModel.fromMap(
-          userDoc.data() as Map<String, dynamic>,
-        );
+        final userData = UserModel.tryFromDocument(userDoc);
+        if (userData == null) return;
+        if (!mounted) return;
         setState(() {
           _shopId = userData.shopId;
         });
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
           SnackBar(content: Text('Error loading user data: $e')),
         );
       }
     }
   }
 
-  Future<void> _saveProduct() async {
+  Future<void> _saveProduct(BuildContext pageContext) async {
     if (!_formKey.currentState!.validate()) {
       return;
     }
 
     if (_shopId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Shop ID not found')),
-      );
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
+          const SnackBar(content: Text('Shop ID not found')),
+        );
+      }
       return;
     }
 
@@ -90,36 +96,39 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
 
     try {
       final price = double.parse(_priceController.text);
-      final stock = double.parse(_stockController.text);
 
       if (price <= 0) {
         throw Exception('Price must be greater than zero');
       }
 
-      if (stock < 0) {
-        throw Exception('Stock cannot be negative');
-      }
-
       if (_isEditing && widget.product != null) {
-        // Update existing product
+        // Update existing product (stock is immutable on client — use adjustStock)
         await FirebaseFirestore.instance
             .collection('products')
             .doc(widget.product!.productId)
-            .update({
-          'name': _nameController.text.trim(),
-          'price': price,
-          'stock': stock,
-          // Note: measurementType is immutable after first sale
-        });
+            .update(
+              FirestoreRuleSafeUpdate.product(
+                widget.product!,
+                changes: {
+                  'name': _nameController.text.trim(),
+                  'price': price,
+                },
+              ),
+            );
 
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
+        if (pageContext.mounted) {
+          ScaffoldMessenger.of(pageContext).showSnackBar(
             const SnackBar(content: Text('Product updated successfully')),
           );
-          Navigator.of(context).pop();
+          Navigator.of(pageContext).pop();
         }
       } else {
-        // Create new product
+        // Create new product (initial stock allowed on create per Firestore rules)
+        final stock = double.parse(_stockController.text);
+        if (stock < 0) {
+          throw Exception('Stock cannot be negative');
+        }
+
         final productId = FirebaseFirestore.instance
             .collection('products')
             .doc()
@@ -139,16 +148,16 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
           'createdAt': FieldValue.serverTimestamp(),
         });
 
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
+        if (pageContext.mounted) {
+          ScaffoldMessenger.of(pageContext).showSnackBar(
             const SnackBar(content: Text('Product created successfully')),
           );
-          Navigator.of(context).pop();
+          Navigator.of(pageContext).pop();
         }
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
           SnackBar(content: Text('Error saving product: $e')),
         );
       }
@@ -254,13 +263,19 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
               ],
               TextFormField(
                 controller: _stockController,
-                decoration: const InputDecoration(
-                  labelText: 'Stock Quantity',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.warehouse),
+                decoration: InputDecoration(
+                  labelText: _isEditing ? 'Current Stock' : 'Stock Quantity',
+                  border: const OutlineInputBorder(),
+                  prefixIcon: const Icon(Icons.warehouse),
+                  helperText: _isEditing
+                      ? 'Use Inventory Adjustment to change stock'
+                      : null,
                 ),
                 keyboardType: TextInputType.number,
+                readOnly: _isEditing,
+                enabled: !_isEditing,
                 validator: (value) {
+                  if (_isEditing) return null;
                   if (value == null || value.trim().isEmpty) {
                     return 'Stock quantity is required';
                   }
@@ -273,7 +288,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
               ),
               const SizedBox(height: 32),
               FilledButton(
-                onPressed: _isLoading ? null : _saveProduct,
+                onPressed: _isLoading ? null : () => _saveProduct(context),
                 style: FilledButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 16),
                 ),

@@ -2,8 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../../../core/firestore/firestore_rule_safe_update.dart';
 import '../../../data/models/category_model.dart';
+import '../../../widgets/firestore_paginated_list.dart';
 import '../../../data/models/user_model.dart';
+import '../../../routing/guarded_navigator.dart';
+import '../../../routing/screen_permission.dart';
 import 'category_form_screen.dart';
 
 /// Category List Screen - Admin view of all categories for a shop.
@@ -23,15 +27,18 @@ class _CategoryListScreenState extends State<CategoryListScreen> {
   @override
   void initState() {
     super.initState();
-    _loadUserShop();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _loadUserShop(context);
+    });
   }
 
-  Future<void> _loadUserShop() async {
+  Future<void> _loadUserShop(BuildContext pageContext) async {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
-        if (mounted) {
-          Navigator.of(context).pop();
+        if (pageContext.mounted) {
+          Navigator.of(pageContext).pop();
         }
         return;
       }
@@ -42,36 +49,46 @@ class _CategoryListScreenState extends State<CategoryListScreen> {
           .get();
 
       if (userDoc.exists) {
-        final userData = UserModel.fromMap(
-          userDoc.data() as Map<String, dynamic>,
-        );
+        final userData = UserModel.tryFromDocument(userDoc);
+        if (userData == null) return;
+        if (!mounted) return;
         setState(() {
           _shopId = userData.shopId;
           _isLoading = false;
         });
       } else {
+        if (!mounted) return;
         setState(() => _isLoading = false);
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
           SnackBar(content: Text('Error loading user data: $e')),
         );
       }
+      if (!mounted) return;
       setState(() => _isLoading = false);
     }
   }
 
-  Future<void> _toggleStatus(CategoryModel category) async {
+  Future<void> _toggleStatus(
+    BuildContext pageContext,
+    CategoryModel category,
+  ) async {
     final newStatus =
         category.status == 'Active' ? 'Inactive' : 'Active';
     try {
       await FirebaseFirestore.instance
           .collection('categories')
           .doc(category.categoryId)
-          .update({'status': newStatus});
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+          .update(
+            FirestoreRuleSafeUpdate.category(
+              category,
+              changes: {'status': newStatus},
+            ),
+          );
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
           SnackBar(
             content: Text(
               'Category ${newStatus == 'Active' ? 'enabled' : 'disabled'}',
@@ -80,8 +97,8 @@ class _CategoryListScreenState extends State<CategoryListScreen> {
         );
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
           SnackBar(content: Text('Error updating category: $e')),
         );
       }
@@ -114,13 +131,10 @@ class _CategoryListScreenState extends State<CategoryListScreen> {
             icon: const Icon(Icons.add),
             tooltip: 'Add Category',
             onPressed: () {
-              Navigator.push(
+              GuardedNavigator.push(
                 context,
-                MaterialPageRoute(
-                  builder: (context) => CategoryFormScreen(
-                    shopId: _shopId!,
-                  ),
-                ),
+                permission: ScreenPermission.categoryForm,
+                page: CategoryFormScreen(shopId: _shopId!),
               );
             },
           ),
@@ -156,156 +170,77 @@ class _CategoryListScreenState extends State<CategoryListScreen> {
             ),
           ),
           Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
+            child: FirestorePaginatedList<CategoryModel>(
+              cacheKey: 'categories_shop_$_shopId',
+              queryBuilder: () => FirebaseFirestore.instance
                   .collection('categories')
                   .where('shopId', isEqualTo: _shopId)
-                  .orderBy('name')
-                  .snapshots(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState ==
-                    ConnectionState.waiting) {
-                  return const Center(
-                    child: CircularProgressIndicator(),
-                  );
-                }
-                if (snapshot.hasError) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.error_outline,
-                          size: 64,
-                          color: colorScheme.error,
-                        ),
-                        const SizedBox(height: 16),
-                        Text('Error loading categories: ${snapshot.error}'),
-                      ],
-                    ),
-                  );
-                }
-                if (!snapshot.hasData ||
-                    snapshot.data!.docs.isEmpty) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.category_outlined,
-                          size: 64,
-                          color: colorScheme.outline,
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          'No categories found',
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleLarge,
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Tap + to add your first category',
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodyMedium
-                              ?.copyWith(
-                            color: colorScheme.outline,
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                }
-
-                final allCategories = snapshot.data!.docs
-                    .map(
-                      (doc) => CategoryModel.fromMap(
-                        doc.data() as Map<String, dynamic>,
-                      ),
-                    )
+                  .orderBy('name'),
+              parse: (data, _) => CategoryModel.tryFromMap(data),
+              itemKey: (c) => c.categoryId,
+              filterItems: (items) {
+                if (_searchQuery.isEmpty) return items;
+                final q = _searchQuery.toLowerCase();
+                return items
+                    .where((c) => c.name.toLowerCase().contains(q))
                     .toList();
-
-                List<CategoryModel> filtered = allCategories;
-                if (_searchQuery.isNotEmpty) {
-                  final q = _searchQuery.toLowerCase();
-                  filtered = allCategories
-                      .where(
-                        (c) => c.name.toLowerCase().contains(q),
-                      )
-                      .toList();
-                }
-
-                if (filtered.isEmpty) {
-                  return Center(
-                    child: Text(
-                      'No categories match your search',
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodyLarge,
-                    ),
-                  );
-                }
-
-                return ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: filtered.length,
-                  itemBuilder: (context, index) {
-                    final category = filtered[index];
-                    final isActive = category.status == 'Active';
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      child: ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor: isActive
-                              ? colorScheme.primaryContainer
-                              : colorScheme.errorContainer,
-                          child: Icon(
-                            Icons.category,
-                            color: isActive
-                                ? colorScheme.onPrimaryContainer
-                                : colorScheme.onErrorContainer,
-                          ),
-                        ),
-                        title: Text(category.name),
-                        subtitle: Text(
-                          'Status: ${category.status}',
-                          style: TextStyle(
-                            color: isActive
-                                ? colorScheme.primary
-                                : colorScheme.error,
-                          ),
-                        ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Switch(
-                              value: isActive,
-                              onChanged: (_) =>
-                                  _toggleStatus(category),
-                            ),
-                            IconButton(
-                              icon:
-                                  const Icon(Icons.edit, size: 20),
-                              tooltip: 'Edit',
-                              onPressed: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) =>
-                                        CategoryFormScreen(
-                                      shopId: _shopId!,
-                                      category: category,
-                                    ),
-                                  ),
-                                );
-                              },
-                            ),
-                          ],
-                        ),
+              },
+              emptyBuilder: (context) => Center(
+                child: Text(
+                  _searchQuery.isEmpty
+                      ? 'No categories found'
+                      : 'No categories match your search',
+                ),
+              ),
+              itemBuilder: (context, category) {
+                final isActive = category.status == 'Active';
+                return Card(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  child: ListTile(
+                    leading: CircleAvatar(
+                      backgroundColor: isActive
+                          ? colorScheme.primaryContainer
+                          : colorScheme.errorContainer,
+                      child: Icon(
+                        Icons.category,
+                        color: isActive
+                            ? colorScheme.onPrimaryContainer
+                            : colorScheme.onErrorContainer,
                       ),
-                    );
-                  },
+                    ),
+                    title: Text(category.name),
+                    subtitle: Text(
+                      'Status: ${category.status}',
+                      style: TextStyle(
+                        color: isActive
+                            ? colorScheme.primary
+                            : colorScheme.error,
+                      ),
+                    ),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Switch(
+                          value: isActive,
+                          onChanged: (_) => _toggleStatus(context, category),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.edit, size: 20),
+                          tooltip: 'Edit',
+                          onPressed: () {
+                            GuardedNavigator.push(
+                              context,
+                              permission: ScreenPermission.categoryForm,
+                              page: CategoryFormScreen(
+                                shopId: _shopId!,
+                                category: category,
+                              ),
+                            );
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
                 );
               },
             ),

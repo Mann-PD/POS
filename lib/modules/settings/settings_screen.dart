@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
+import '../../core/observability/error_ui.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import '../../core/firestore/firestore_parse.dart';
+import '../../core/firestore/firestore_rule_safe_update.dart';
 import '../../data/models/user_model.dart';
 import '../../core/rbac/role_constants.dart';
+import '../../routing/permission_gate.dart';
+import '../../routing/screen_permission.dart';
 
 /// Settings Screen
 ///
@@ -24,15 +29,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void initState() {
     super.initState();
-    _loadCurrentUser();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _loadCurrentUser(context);
+    });
   }
 
-  Future<void> _loadCurrentUser() async {
+  Future<void> _loadCurrentUser(BuildContext pageContext) async {
     try {
       final firebaseUser = FirebaseAuth.instance.currentUser;
       if (firebaseUser == null) {
-        if (mounted) {
-          Navigator.of(context).pushReplacementNamed('/login');
+        if (pageContext.mounted) {
+          Navigator.of(pageContext).pushReplacementNamed('/login');
         }
         return;
       }
@@ -42,21 +50,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
           .doc(firebaseUser.uid)
           .get();
 
-      if (userDoc.exists && mounted) {
+      if (!mounted) return;
+      if (userDoc.exists) {
         setState(() {
-          _currentUser = UserModel.fromMap(
-            userDoc.data() as Map<String, dynamic>,
-          );
+          final u = UserModel.tryFromDocument(userDoc);
+          if (u != null) _currentUser = u;
           _isLoadingUser = false;
         });
+      } else {
+        setState(() => _isLoadingUser = false);
       }
     } catch (e) {
-      if (mounted) {
-        setState(() => _isLoadingUser = false);
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
           SnackBar(content: Text('Error loading user data: $e')),
         );
       }
+      if (!mounted) return;
+      setState(() => _isLoadingUser = false);
     }
   }
 
@@ -78,7 +89,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _updateSetting(
-    BuildContext context,
+    BuildContext pageContext,
     Map<String, dynamic> settingData,
   ) async {
     final settingId = settingData['settingId'] as String;
@@ -87,7 +98,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final controller = TextEditingController(text: currentValue);
 
     final newValue = await showDialog<String>(
-      context: context,
+      context: pageContext,
       builder: (ctx) => AlertDialog(
         title: Text('Update: ${settingData['key']}'),
         content: TextField(
@@ -114,7 +125,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
 
     if (newValue == null || newValue == currentValue) return;
-    if (!mounted) return;
 
     try {
       // Update setting in Firestore
@@ -122,10 +132,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await FirebaseFirestore.instance
           .collection('settings')
           .doc(settingId)
-          .update({
-        'value': newValue,
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
+          .update(
+            FirestoreRuleSafeUpdate.settingFromMap(
+              settingData,
+              changes: {
+                'value': newValue,
+                'updatedAt': FieldValue.serverTimestamp(),
+              },
+            ),
+          );
 
       // Write audit log via Cloud Function (direct client writes to audit_logs
       // are blocked by Firestore rules: allow create: if false)
@@ -143,12 +158,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
             'scope': settingData['scope'],
           },
         });
-      } catch (_) {
-        // Audit log failure is non-fatal; setting was already saved
+      } catch (e, st) {
+        reportCatch(e, stackTrace: st, tag: 'SettingsScreen.audit');
       }
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
           SnackBar(
             content: Text('Setting "${settingData['key']}" updated'),
             backgroundColor: Colors.green,
@@ -156,8 +171,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         );
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
           SnackBar(
             content: Text('Failed to update setting: $e'),
             backgroundColor: Colors.red,
@@ -169,6 +184,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    return PermissionGate(
+      permission: ScreenPermission.systemSettings,
+      child: _buildSettingsScaffold(context),
+    );
+  }
+
+  Widget _buildSettingsScaffold(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
@@ -197,7 +219,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       const Text('Unable to load user information'),
                       const SizedBox(height: 24),
                       FilledButton(
-                        onPressed: _loadCurrentUser,
+                        onPressed: () => _loadCurrentUser(context),
                         child: const Text('Retry'),
                       ),
                     ],
@@ -262,11 +284,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
                     // Group settings by scope for cleaner display
                     final shopSettings = docs
-                        .map((d) => d.data() as Map<String, dynamic>)
+                        .map((d) => FirestoreParse.queryDocumentData(d))
+                        .whereType<Map<String, dynamic>>()
                         .where((s) => s['scope'] == 'shop')
                         .toList();
                     final systemSettings = docs
-                        .map((d) => d.data() as Map<String, dynamic>)
+                        .map((d) => FirestoreParse.queryDocumentData(d))
+                        .whereType<Map<String, dynamic>>()
                         .where((s) => s['scope'] == 'system')
                         .toList();
 

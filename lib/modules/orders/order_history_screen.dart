@@ -1,12 +1,18 @@
 import 'package:flutter/material.dart';
+import '../../core/observability/error_ui.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import '../../core/firestore/firestore_pagination.dart';
 import '../../data/models/order_model.dart';
-import '../reports/reports_service.dart';
+import '../../data/models/user_model.dart';
+import '../../routing/guarded_navigator.dart';
+import '../../routing/permission_gate.dart';
+import '../../routing/screen_permission.dart';
+import '../../widgets/firestore_paginated_list.dart';
 import 'order_detail_screen.dart';
 
-/// Admin Order History: list shop orders, view details, cancel pending (via CF).
+/// Admin Order History: paginated shop orders, view details, cancel pending (via CF).
 /// Locked orders read-only; no delete.
 class OrderHistoryScreen extends StatefulWidget {
   const OrderHistoryScreen({
@@ -24,10 +30,10 @@ class OrderHistoryScreen extends StatefulWidget {
 }
 
 class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
-  final ReportsService _reports = ReportsService();
   String? _shopId;
   bool _loading = true;
   bool _isSuperAdmin = false;
+  int _listKey = 0;
 
   @override
   void initState() {
@@ -53,24 +59,48 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
           .collection('users')
           .doc(user.uid)
           .get();
-      if (doc.exists) {
-        final data = doc.data()!;
-        final role = (data['role'] as String? ?? '').toString().toLowerCase().replaceAll(RegExp(r'[_\s-]'), '');
+      final data = UserModel.tryFromDocument(doc);
+      if (data != null) {
+        final role = data.role.toLowerCase().replaceAll(RegExp(r'[_\s-]'), '');
         setState(() {
-          _shopId = data['shopId'] as String? ?? '';
+          _shopId = data.shopId;
           _isSuperAdmin = role == 'superadmin';
           _loading = false;
         });
       } else {
         setState(() => _loading = false);
       }
-    } catch (_) {
+    } catch (e, st) {
+      reportCatch(e, stackTrace: st, tag: 'OrderHistoryScreen._load');
       setState(() => _loading = false);
     }
   }
 
+  Query<Map<String, dynamic>> _ordersQuery() {
+    if (_isSuperAdmin) {
+      return FirebaseFirestore.instance
+          .collection('orders')
+          .orderBy('createdAt', descending: true);
+    }
+    return FirebaseFirestore.instance
+        .collection('orders')
+        .where('shopId', isEqualTo: _shopId)
+        .orderBy('createdAt', descending: true);
+  }
+
+  void _refreshList() {
+    setState(() => _listKey++);
+  }
+
   @override
   Widget build(BuildContext context) {
+    return PermissionGate(
+      permission: ScreenPermission.orderHistory,
+      child: _buildContent(context),
+    );
+  }
+
+  Widget _buildContent(BuildContext context) {
     if (_loading) {
       return Scaffold(
         appBar: AppBar(title: Text(widget.readOnly ? 'Order History (View Only)' : 'Order History')),
@@ -84,59 +114,40 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
       );
     }
 
-    final stream = _isSuperAdmin
-        ? _reports.streamAllOrdersSuperAdmin()
-        : _reports.streamAllOrdersForShop(shopId: _shopId!);
-
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.readOnly ? 'Order History (View Only)' : 'Order History'),
       ),
-      body: StreamBuilder<List<OrderModel>>(
-        stream: stream,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) {
-            return Center(child: Text('Error: ${snapshot.error}'));
-          }
-          final orders = snapshot.data ?? [];
-          if (orders.isEmpty) {
-            return const Center(child: Text('No orders yet'));
-          }
-
-          return ListView.builder(
-            padding: const EdgeInsets.all(16),
-            itemCount: orders.length,
-            itemBuilder: (context, index) {
-              final order = orders[index];
-              return _OrderCard(
-                order: order,
-                readOnly: widget.readOnly,
-                onTap: () => _showOrderDetail(context, order),
-                onCancel: order.isPending && !widget.readOnly
-                    ? () => _cancelOrder(context, order)
-                    : null,
-              );
-            },
-          );
-        },
+      body: FirestorePagedList<OrderModel>(
+        key: ValueKey('order_history_$_listKey'),
+        pageSize: FirestorePageSize.history,
+        queryBuilder: _ordersQuery,
+        parse: (data, _) => OrderModel.tryFromMap(data),
+        itemKey: (o) => o.orderId,
+        emptyBuilder: (_) => const Center(child: Text('No orders yet')),
+        onRefresh: () async => _refreshList(),
+        itemBuilder: (context, order) => _OrderCard(
+          order: order,
+          readOnly: widget.readOnly,
+          onTap: () => _showOrderDetail(context, order),
+          onCancel: order.isPending && !widget.readOnly
+              ? () => _cancelOrder(context, order)
+              : null,
+        ),
       ),
     );
   }
 
   void _showOrderDetail(BuildContext context, OrderModel order) {
-    Navigator.push(
+    GuardedNavigator.push(
       context,
-      MaterialPageRoute(
-        builder: (context) => OrderDetailScreen(
-          order: order,
-          readOnly: widget.readOnly,
-          onCancel: order.isPending && !widget.readOnly
-              ? () => _cancelOrder(context, order)
-              : null,
-        ),
+      permission: ScreenPermission.orderDetail,
+      page: OrderDetailScreen(
+        order: order,
+        readOnly: widget.readOnly,
+        onCancel: order.isPending && !widget.readOnly
+            ? () => _cancelOrder(context, order)
+            : null,
       ),
     );
   }
@@ -171,23 +182,21 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
         'shopId': order.shopId,
         'reason': 'Cancelled from Admin Order History',
       });
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Order cancelled')),
-        );
-      }
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Order cancelled')),
+      );
+      _refreshList();
     } on FirebaseFunctionsException catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed: ${e.message ?? e.code}')),
-        );
-      }
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed: ${e.message ?? e.code}')),
+      );
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
-      }
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e')),
+      );
     }
   }
 }

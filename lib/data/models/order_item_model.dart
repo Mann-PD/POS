@@ -1,3 +1,5 @@
+import '../../core/firestore/firestore_parse.dart';
+
 class OrderItemModel {
   final String orderItemId;
   final String orderId;
@@ -19,14 +21,21 @@ class OrderItemModel {
 
   factory OrderItemModel.fromMap(Map<String, dynamic> map) {
     return OrderItemModel(
-      orderItemId: map['orderItemId'] as String? ?? '',
-      orderId: map['orderId'] as String? ?? '',
-      productId: map['productId'] as String? ?? '',
-      productName: map['productName'] as String? ?? '',
-      quantityOrWeight: (map['quantityOrWeight'] as num?)?.toDouble() ?? 0,
-      priceSnapshot: (map['priceSnapshot'] as num?)?.toDouble() ?? 0,
-      totalPrice: (map['totalPrice'] as num?)?.toDouble() ?? 0,
+      orderItemId: FirestoreParse.stringField(map['orderItemId']),
+      orderId: FirestoreParse.stringField(map['orderId']),
+      productId: FirestoreParse.stringField(map['productId']),
+      productName: FirestoreParse.stringField(map['productName']),
+      quantityOrWeight: FirestoreParse.doubleField(map['quantityOrWeight']),
+      priceSnapshot: FirestoreParse.doubleField(map['priceSnapshot']),
+      totalPrice: FirestoreParse.doubleField(map['totalPrice']),
     );
+  }
+
+  static OrderItemModel? tryFromMap(Map<String, dynamic>? map) {
+    if (map == null) return null;
+    final item = OrderItemModel.fromMap(map);
+    if (item.orderId.isEmpty) return null;
+    return item;
   }
 
   Map<String, dynamic> toMap() {

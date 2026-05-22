@@ -1,11 +1,18 @@
+import 'dart:async' show unawaited;
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:get/get.dart';
-import 'dart:developer' as developer;
 import 'firebase_options.dart';
+import 'core/auth/auth_lifecycle_cleanup.dart';
+import 'core/firestore/firestore_parse.dart';
+import 'core/observability/app_exception_handler.dart';
+import 'core/observability/app_logger.dart';
+import 'core/observability/error_reporter.dart';
+import 'core/observability/error_ui.dart';
+import 'core/observability/user_safe_error_mapper.dart';
 import 'data/models/user_model.dart';
 import 'modules/authentication/auth_controller.dart';
 import 'modules/authentication/login_screen.dart';
@@ -15,17 +22,23 @@ import 'modules/pos/controllers/cart_controller.dart';
 import 'routing/role_based_router.dart';
 import 'routing/route_guard.dart';
 
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+void main() {
+  AppExceptionHandler.runZonedApp(() async {
+    WidgetsFlutterBinding.ensureInitialized();
 
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
 
-  // Disable persistence to avoid stale cache issues
-  FirebaseFirestore.instance.settings = const Settings(
-    persistenceEnabled: false,
-  );
+    await AppExceptionHandler.initialize();
 
-  runApp(const MyApp());
+    // Disable persistence to avoid stale cache issues
+    FirebaseFirestore.instance.settings = const Settings(
+      persistenceEnabled: false,
+    );
+
+    runApp(const MyApp());
+  });
 }
 
 class MyApp extends StatelessWidget {
@@ -67,6 +80,9 @@ class AuthWrapper extends StatefulWidget {
 }
 
 class _AuthWrapperState extends State<AuthWrapper> {
+  String? _cachedUid;
+  Future<UserModel>? _userLoadFuture;
+
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<User?>(
@@ -83,12 +99,23 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
         // User is not authenticated, show login screen
         if (user == null) {
+          _cachedUid = null;
+          _userLoadFuture = null;
+          unawaited(ErrorReporter.instance.clearUserContext());
+          AuthLifecycleCleanup.onAuthStateSignedOut();
           return const LoginScreen();
         }
 
         // User is authenticated, fetch user data and navigate
+        if (_cachedUid != user.uid) {
+          if (_cachedUid != null) {
+            AuthLifecycleCleanup.onAuthStateSignedOut();
+          }
+          _cachedUid = user.uid;
+          _userLoadFuture = _fetchUserData(user.uid);
+        }
         return FutureBuilder<UserModel>(
-          future: _fetchUserData(user.uid),
+          future: _userLoadFuture,
           builder: (context, userSnapshot) {
             if (userSnapshot.connectionState == ConnectionState.waiting) {
               return const Scaffold(
@@ -106,24 +133,20 @@ class _AuthWrapperState extends State<AuthWrapper> {
             }
 
             if (userSnapshot.hasError) {
-              final error = userSnapshot.error;
-              developer.log(
-                'Error fetching user data from Firestore',
-                name: 'AuthWrapper',
-                error: error,
-                stackTrace: userSnapshot.stackTrace,
+              final error = userSnapshot.error!;
+              final stackTrace = userSnapshot.stackTrace;
+              reportCatch(
+                error,
+                stackTrace: stackTrace,
+                tag: 'AuthWrapper.fetchUser',
               );
 
               // Determine error type
               bool isUserSpecificError = false;
               bool isAccountStatusError = false;
-              String errorMessage =
-                  error?.toString() ?? 'Unknown error occurred';
+              final errorMessage = UserSafeErrorMapper.messageFor(error);
 
-              if (error is FirebaseException) {
-                errorMessage =
-                    'Database error (${error.code}): ${error.message ?? 'Unknown'}';
-              } else if (error is Exception) {
+              if (error is Exception) {
                 final errorStr = error.toString().toLowerCase();
                 if (errorStr.contains('user document not found') ||
                     errorStr.contains('user role is empty')) {
@@ -162,7 +185,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
                           Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 32),
                             child: Text(
-                              errorMessage.replaceAll('Exception: ', ''),
+                              errorMessage,
                               textAlign: TextAlign.center,
                               style: const TextStyle(color: Colors.grey),
                             ),
@@ -213,7 +236,11 @@ class _AuthWrapperState extends State<AuthWrapper> {
                       ),
                       const SizedBox(height: 24),
                       ElevatedButton(
-                        onPressed: () => setState(() {}),
+                        onPressed: () {
+                          setState(() {
+                            _userLoadFuture = _fetchUserData(user.uid);
+                          });
+                        },
                         child: const Text('Retry'),
                       ),
                       const SizedBox(height: 12),
@@ -235,18 +262,24 @@ class _AuthWrapperState extends State<AuthWrapper> {
             }
 
             final UserModel userData = userSnapshot.data!;
+            unawaited(
+              ErrorReporter.instance.setUserContext(
+                userId: user.uid,
+                role: userData.role,
+                shopId: userData.shopId,
+              ),
+            );
             final String route = RoleBasedRouter.getInitialRoute(userData.role);
 
             // Navigate to the appropriate dashboard.
             // IMPORTANT: pass userData as arguments so RouteGuard can
             // validate the role synchronously without an async Firestore call.
             WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted) {
-                Navigator.of(context).pushReplacementNamed(
-                  route,
-                  arguments: userData,
-                );
-              }
+              if (!context.mounted) return;
+              Navigator.of(context).pushReplacementNamed(
+                route,
+                arguments: userData,
+              );
             });
 
             return const Scaffold(
@@ -292,14 +325,19 @@ class _AuthWrapperState extends State<AuthWrapper> {
         throw Exception('User document not found');
       }
 
-      final data = userDoc.data() as Map<String, dynamic>;
+      final data = UserModel.tryFromDocument(userDoc);
+      if (data == null) {
+        throw Exception('User document data is invalid');
+      }
 
       // Concurrent login restriction (optional advanced): if a remote
       // activeSessionId exists and does not match this device, treat as invalid.
-      final remoteSessionId = data['activeSessionId'] as String?;
+      final remoteSessionId = FirestoreParse.stringField(
+        FirestoreParse.documentData(userDoc)?['activeSessionId'],
+      );
       final isActiveHere = await SessionManager.isCurrentDeviceActive(
         userId,
-        remoteSessionId,
+        remoteSessionId.isEmpty ? null : remoteSessionId,
       );
       if (!isActiveHere) {
         throw Exception(
@@ -307,7 +345,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
         );
       }
 
-      UserModel user = UserModel.fromMap(data);
+      UserModel user = data;
 
       // Check account status
       if (!user.isActive) {
@@ -323,9 +361,9 @@ class _AuthWrapperState extends State<AuthWrapper> {
               .call<Map<String, dynamic>>();
           final data = result.data;
           if (data['activated'] == true) {
-            developer.log(
+            AppLogger.info(
               'Bootstrap: account activated (no other active users)',
-              name: 'AuthWrapper',
+              tag: 'AuthWrapper',
             );
             user = user.copyWith(status: 'Active');
           } else {
@@ -333,16 +371,13 @@ class _AuthWrapperState extends State<AuthWrapper> {
             // This is an intentional account-status decision.
             throw Exception('Your account is inactive. Contact administrator.');
           }
-        } on FirebaseFunctionsException catch (e) {
-          developer.log(
-            'Bootstrap callable error: ${e.code} ${e.message}',
-            name: 'AuthWrapper',
-          );
+        } on FirebaseFunctionsException catch (e, st) {
+          reportCatch(e, stackTrace: st, tag: 'AuthWrapper.bootstrapFirstUser');
           // Treat callable failures (e.g. INTERNAL) as infrastructure issues,
           // not as "account inactive" so that AuthWrapper shows the retry UI
           // instead of auto-signing the user out.
           throw Exception(
-            'bootstrapFirstUser failed (${e.code}). Please try again or contact administrator.',
+            'Unable to verify account status. Please try again or contact administrator.',
           );
         }
       }
@@ -357,25 +392,19 @@ class _AuthWrapperState extends State<AuthWrapper> {
         throw Exception('No shop assigned. Contact administrator.');
       }
 
-      developer.log(
-        'User loaded: ${user.name} (${user.role}) shop=${user.shopId}',
-        name: 'AuthWrapper',
+      AppLogger.info(
+        'User loaded: role=${user.role} shop=${user.shopId.isEmpty ? "(none)" : "set"}',
+        tag: 'AuthWrapper',
       );
 
       return user;
-    } on FirebaseException catch (e) {
-      developer.log(
-        'Firestore error: code=${e.code}, message=${e.message}',
-        name: '_fetchUserData',
-      );
+    } on FirebaseException catch (e, st) {
+      reportCatch(e, stackTrace: st, tag: 'AuthWrapper._fetchUserData');
       rethrow;
-    } catch (e) {
-      developer.log(
-        'Error fetching user data',
-        name: '_fetchUserData',
-        error: e,
-      );
+    } catch (e, st) {
+      reportCatch(e, stackTrace: st, tag: 'AuthWrapper._fetchUserData');
       rethrow;
     }
   }
 }
+

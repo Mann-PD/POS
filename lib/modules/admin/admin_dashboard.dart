@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/observability/error_ui.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:get/get.dart';
@@ -22,6 +23,8 @@ import 'audit_logs_screen.dart';
 import 'settings_screen.dart';
 import '../../data/models/order_model.dart';
 import '../../data/models/user_model.dart';
+import '../../routing/guarded_navigator.dart';
+import '../../routing/screen_permission.dart';
 
 /// Admin Dashboard - Entry screen for admin users
 /// Displays today's sales, order count, low-stock alerts, recent orders; navigation to modules.
@@ -56,13 +59,16 @@ class _AdminDashboardState extends State<AdminDashboard> {
           .collection('users')
           .doc(user.uid)
           .get();
+      if (!mounted) return;
       if (!userDoc.exists) {
         setState(() => _loading = false);
         return;
       }
-      final userData = UserModel.fromMap(
-        userDoc.data() as Map<String, dynamic>,
-      );
+      final userData = UserModel.tryFromDocument(userDoc);
+      if (userData == null) {
+        setState(() => _loading = false);
+        return;
+      }
       final shopId = userData.shopId;
 
       final reports = ReportsService();
@@ -77,17 +83,18 @@ class _AdminDashboardState extends State<AdminDashboard> {
         shopId: shopId.isEmpty ? null : shopId,
         limit: 5,
       );
-      if (mounted) {
-        setState(() {
-          _todaySales = (summary['totalSales'] as num?)?.toDouble() ?? 0;
-          _todayOrderCount = summary['orderCount'] as int? ?? 0;
-          _lowStockCount = lowStock;
-          _recentOrders = recent;
-          _loading = false;
-        });
-      }
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
+      if (!mounted) return;
+      setState(() {
+        _todaySales = (summary['totalSales'] as num?)?.toDouble() ?? 0;
+        _todayOrderCount = summary['orderCount'] as int? ?? 0;
+        _lowStockCount = lowStock;
+        _recentOrders = recent;
+        _loading = false;
+      });
+    } catch (e, st) {
+      reportCatch(e, stackTrace: st, tag: 'AdminDashboard._loadDashboard');
+      if (!mounted) return;
+      setState(() => _loading = false);
     }
   }
 
@@ -110,14 +117,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
       ),
     );
 
-    if (confirm == true && context.mounted) {
-      await AuthController().signOut();
-      if (context.mounted) {
-        Navigator.of(
-          context,
-        ).pushNamedAndRemoveUntil('/login', (route) => false);
-      }
-    }
+    if (confirm != true) return;
+    if (!context.mounted) return;
+    await AuthController().signOut();
+    if (!context.mounted) return;
+    Navigator.of(
+      context,
+    ).pushNamedAndRemoveUntil('/login', (route) => false);
   }
 
   Widget _buildSummarySection(BuildContext context, ColorScheme colorScheme) {
@@ -259,11 +265,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   ),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () {
-                    Navigator.push(
+                    GuardedNavigator.push(
                       context,
-                      MaterialPageRoute(
-                        builder: (context) => const OrderHistoryScreen(),
-                      ),
+                      permission: ScreenPermission.orderHistory,
+                      page: const OrderHistoryScreen(),
                     );
                   },
                 );
@@ -370,11 +375,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     icon: Icons.inventory_2,
                     color: colorScheme.primary,
                     onTap: () {
-                      Navigator.push(
+                      GuardedNavigator.push(
                         context,
-                        MaterialPageRoute(
-                          builder: (context) => const ProductListScreen(),
-                        ),
+                        permission: ScreenPermission.productList,
+                        page: const ProductListScreen(),
                       );
                     },
                   ),
@@ -384,11 +388,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     icon: Icons.warehouse,
                     color: colorScheme.secondary,
                     onTap: () {
-                      Navigator.push(
+                      GuardedNavigator.push(
                         context,
-                        MaterialPageRoute(
-                          builder: (context) => const InventoryScreen(),
-                        ),
+                        permission: ScreenPermission.inventory,
+                        page: const InventoryScreen(),
                       );
                     },
                   ),
@@ -398,11 +401,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     icon: Icons.people,
                     color: colorScheme.tertiary,
                     onTap: () {
-                      Navigator.push(
+                      GuardedNavigator.push(
                         context,
-                        MaterialPageRoute(
-                          builder: (context) => const EmployeeListScreen(),
-                        ),
+                        permission: ScreenPermission.employeeList,
+                        page: const EmployeeListScreen(),
                       );
                     },
                   ),
@@ -412,11 +414,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     icon: Icons.account_balance_wallet,
                     color: colorScheme.error,
                     onTap: () {
-                      Navigator.push(
+                      GuardedNavigator.push(
                         context,
-                        MaterialPageRoute(
-                          builder: (context) => const ExpenseScreen(),
-                        ),
+                        permission: ScreenPermission.expenseList,
+                        page: const ExpenseScreen(),
                       );
                     },
                   ),
@@ -426,11 +427,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     icon: Icons.person_outline,
                     color: colorScheme.primaryContainer,
                     onTap: () {
-                      Navigator.push(
+                      GuardedNavigator.push(
                         context,
-                        MaterialPageRoute(
-                          builder: (context) => const CustomerListScreen(),
-                        ),
+                        permission: ScreenPermission.customerList,
+                        page: const CustomerListScreen(),
                       );
                     },
                   ),
@@ -440,12 +440,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     icon: Icons.category,
                     color: colorScheme.secondaryContainer,
                     onTap: () {
-                      Navigator.push(
+                      GuardedNavigator.push(
                         context,
-                        MaterialPageRoute(
-                          builder: (context) =>
-                              const CategoryListScreen(),
-                        ),
+                        permission: ScreenPermission.categoryList,
+                        page: const CategoryListScreen(),
                       );
                     },
                   ),
@@ -455,12 +453,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     icon: Icons.tune,
                     color: colorScheme.tertiaryContainer,
                     onTap: () {
-                      Navigator.push(
+                      GuardedNavigator.push(
                         context,
-                        MaterialPageRoute(
-                          builder: (context) =>
-                              const InventoryAdjustmentScreen(),
-                        ),
+                        permission: ScreenPermission.inventoryAdjustment,
+                        page: const InventoryAdjustmentScreen(),
                       );
                     },
                   ),
@@ -495,11 +491,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     icon: Icons.bar_chart,
                     color: colorScheme.primary,
                     onTap: () {
-                      Navigator.push(
+                      GuardedNavigator.push(
                         context,
-                        MaterialPageRoute(
-                          builder: (context) => const SalesReportScreen(),
-                        ),
+                        permission: ScreenPermission.salesReport,
+                        page: const SalesReportScreen(),
                       );
                     },
                   ),
@@ -509,12 +504,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     icon: Icons.insights,
                     color: colorScheme.secondary,
                     onTap: () {
-                      Navigator.push(
+                      GuardedNavigator.push(
                         context,
-                        MaterialPageRoute(
-                          builder: (context) =>
-                              const ProductSalesReportScreen(),
-                        ),
+                        permission: ScreenPermission.productSalesReport,
+                        page: const ProductSalesReportScreen(),
                       );
                     },
                   ),
@@ -524,12 +517,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     icon: Icons.people_alt,
                     color: colorScheme.tertiary,
                     onTap: () {
-                      Navigator.push(
+                      GuardedNavigator.push(
                         context,
-                        MaterialPageRoute(
-                          builder: (context) =>
-                              const EmployeePerformanceScreen(),
-                        ),
+                        permission: ScreenPermission.employeePerformanceReport,
+                        page: const EmployeePerformanceScreen(),
                       );
                     },
                   ),
@@ -539,11 +530,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     icon: Icons.account_balance_wallet,
                     color: colorScheme.error,
                     onTap: () {
-                      Navigator.push(
+                      GuardedNavigator.push(
                         context,
-                        MaterialPageRoute(
-                          builder: (context) => const ExpenseReportScreen(),
-                        ),
+                        permission: ScreenPermission.expenseReport,
+                        page: const ExpenseReportScreen(),
                       );
                     },
                   ),
@@ -612,9 +602,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
       elevation: 2,
       child: InkWell(
         onTap: () {
-          Navigator.push(
+          GuardedNavigator.push(
             context,
-            MaterialPageRoute(builder: (context) => const ReportsDashboard()),
+            permission: ScreenPermission.reportsDashboard,
+            page: const ReportsDashboard(),
           );
         },
         borderRadius: BorderRadius.circular(12),
@@ -670,9 +661,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
       elevation: 2,
       child: InkWell(
         onTap: () {
-          Navigator.push(
+          GuardedNavigator.push(
             context,
-            MaterialPageRoute(builder: (context) => const OrderHistoryScreen()),
+            permission: ScreenPermission.orderHistory,
+            page: const OrderHistoryScreen(),
           );
         },
         borderRadius: BorderRadius.circular(12),
@@ -728,9 +720,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
       elevation: 2,
       child: InkWell(
         onTap: () {
-          Navigator.push(
+          GuardedNavigator.push(
             context,
-            MaterialPageRoute(builder: (context) => const AuditLogsScreen()),
+            permission: ScreenPermission.auditLogs,
+            page: const AuditLogsScreen(),
           );
         },
         borderRadius: BorderRadius.circular(12),
@@ -786,9 +779,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
       elevation: 2,
       child: InkWell(
         onTap: () {
-          Navigator.push(
+          GuardedNavigator.push(
             context,
-            MaterialPageRoute(builder: (context) => const SettingsScreen()),
+            permission: ScreenPermission.adminSettings,
+            page: const SettingsScreen(),
           );
         },
         borderRadius: BorderRadius.circular(12),

@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../core/firestore/firestore_parse.dart';
 
 class ShopModel {
   final String shopId;
@@ -13,14 +14,44 @@ class ShopModel {
     required this.createdAt,
   });
 
+  static String _normalizeStatus(dynamic value) {
+    final s = FirestoreParse.stringField(value, fallback: 'Active');
+    if (s.isEmpty) return 'Active';
+    final lower = s.toLowerCase().trim();
+    if (lower == 'active') return 'Active';
+    if (lower == 'inactive') return 'Inactive';
+    return s;
+  }
+
   factory ShopModel.fromMap(Map<String, dynamic> map) {
     return ShopModel(
-      shopId: map['shopId'] as String? ?? '',
-      name: map['name'] as String? ?? '',
-      status: map['status'] as String? ?? 'Active',
-      createdAt: map['createdAt'] is Timestamp
-          ? (map['createdAt'] as Timestamp).toDate()
-          : DateTime.now(),
+      shopId: FirestoreParse.stringField(map['shopId']),
+      name: FirestoreParse.stringField(map['name']),
+      status: _normalizeStatus(map['status']),
+      createdAt: FirestoreParse.dateTimeField(map['createdAt']),
+    );
+  }
+
+  static ShopModel? tryFromMap(Map<String, dynamic>? map) {
+    if (map == null) return null;
+    final shop = ShopModel.fromMap(map);
+    if (shop.shopId.isEmpty) return null;
+    return shop;
+  }
+
+  static ShopModel? tryFromDocument(DocumentSnapshot doc) {
+    return FirestoreParse.tryParse(
+      doc,
+      ShopModel.fromMap,
+      validate: (s) => s.shopId.isNotEmpty,
+    );
+  }
+
+  static ShopModel? tryFromQueryDocument(QueryDocumentSnapshot doc) {
+    return FirestoreParse.tryParseQuery(
+      doc,
+      ShopModel.fromMap,
+      validate: (s) => s.shopId.isNotEmpty,
     );
   }
 

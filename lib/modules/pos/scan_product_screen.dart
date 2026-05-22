@@ -35,19 +35,19 @@ class _ScanProductScreenState extends State<ScanProductScreen> {
     // 1. barcode == code
     var snap = await base.where('barcode', isEqualTo: code).limit(1).get();
     if (snap.docs.isNotEmpty) {
-      return ProductModel.fromMap(snap.docs.first.data());
+      return ProductModel.tryFromQueryDocument(snap.docs.first);
     }
 
     // 2. productId == code
     snap = await base.where('productId', isEqualTo: code).limit(1).get();
     if (snap.docs.isNotEmpty) {
-      return ProductModel.fromMap(snap.docs.first.data());
+      return ProductModel.tryFromQueryDocument(snap.docs.first);
     }
 
     // 3. name == code
     snap = await base.where('name', isEqualTo: code).limit(1).get();
     if (snap.docs.isNotEmpty) {
-      return ProductModel.fromMap(snap.docs.first.data());
+      return ProductModel.tryFromQueryDocument(snap.docs.first);
     }
 
     return null;
@@ -66,28 +66,28 @@ class _ScanProductScreenState extends State<ScanProductScreen> {
     try {
       final product = await _findProduct(rawValue);
       if (product == null) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('No product found for code: $rawValue'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('No product found for code: $rawValue'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        if (!context.mounted) return;
         setState(() => _isProcessing = false);
         return;
       }
 
       // Basic validation: status + stock, then add directly with quantity 1
       if (product.stock <= 0 || product.status != 'Active') {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Product is not available'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Product is not available'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        if (!context.mounted) return;
         setState(() => _isProcessing = false);
         return;
       }
@@ -96,29 +96,28 @@ class _ScanProductScreenState extends State<ScanProductScreen> {
       final cart = Get.find<CartController>();
       cart.addItem(product, 1);
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('${product.name} added to cart (scan)'),
-            behavior: SnackBarBehavior.floating,
-            duration: const Duration(seconds: 1),
-          ),
-        );
-      }
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${product.name} added to cart (scan)'),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 1),
+        ),
+      );
 
       widget.onProductScanned(product);
-      if (mounted) Navigator.of(context).pop();
+      if (!context.mounted) return;
+      Navigator.of(context).pop();
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Scan error: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Scan error: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
     } finally {
-      if (mounted) {
+      if (context.mounted) {
         setState(() => _isProcessing = false);
       }
     }

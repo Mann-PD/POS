@@ -2,9 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:get/get.dart';
+import '../../../core/firestore/firestore_rule_safe_update.dart';
 import '../../../data/models/product_model.dart';
+import '../../../widgets/firestore_paginated_list.dart';
 import '../../../data/models/user_model.dart';
 import 'product_controller.dart';
+import '../../../routing/guarded_navigator.dart';
+import '../../../routing/screen_permission.dart';
 import 'product_form_screen.dart';
 
 /// Product List Screen - Admin view of all products
@@ -24,15 +28,18 @@ class _ProductListScreenState extends State<ProductListScreen> {
   @override
   void initState() {
     super.initState();
-    _loadUserData();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _loadUserData(context);
+    });
   }
 
-  Future<void> _loadUserData() async {
+  Future<void> _loadUserData(BuildContext pageContext) async {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
-        if (mounted) {
-          Navigator.of(context).pop();
+        if (pageContext.mounted) {
+          Navigator.of(pageContext).pop();
         }
         return;
       }
@@ -43,9 +50,9 @@ class _ProductListScreenState extends State<ProductListScreen> {
           .get();
 
       if (userDoc.exists) {
-        final userData = UserModel.fromMap(
-          userDoc.data() as Map<String, dynamic>,
-        );
+        final userData = UserModel.tryFromDocument(userDoc);
+        if (userData == null) return;
+        if (!mounted) return;
         setState(() {
           _shopId = userData.shopId;
           _isLoading = false;
@@ -53,11 +60,12 @@ class _ProductListScreenState extends State<ProductListScreen> {
         _controller.setLoading(false);
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
           SnackBar(content: Text('Error loading user data: $e')),
         );
       }
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
       });
@@ -65,18 +73,26 @@ class _ProductListScreenState extends State<ProductListScreen> {
     }
   }
 
-  Future<void> _toggleProductStatus(ProductModel product) async {
+  Future<void> _toggleProductStatus(
+    BuildContext pageContext,
+    ProductModel product,
+  ) async {
     try {
       _controller.setLoading(true);
       await FirebaseFirestore.instance
           .collection('products')
           .doc(product.productId)
-          .update({
-        'status': product.status == 'Active' ? 'Inactive' : 'Active',
-      });
+          .update(
+            FirestoreRuleSafeUpdate.product(
+              product,
+              changes: {
+                'status': product.status == 'Active' ? 'Inactive' : 'Active',
+              },
+            ),
+          );
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
           SnackBar(
             content: Text(
               'Product ${product.status == 'Active' ? 'deactivated' : 'activated'}',
@@ -85,8 +101,8 @@ class _ProductListScreenState extends State<ProductListScreen> {
         );
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (pageContext.mounted) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
           SnackBar(content: Text('Error updating product: $e')),
         );
       }
@@ -111,11 +127,10 @@ class _ProductListScreenState extends State<ProductListScreen> {
           IconButton(
             icon: const Icon(Icons.add),
             onPressed: () {
-              Navigator.push(
+              GuardedNavigator.push(
                 context,
-                MaterialPageRoute(
-                  builder: (context) => const ProductFormScreen(),
-                ),
+                permission: ScreenPermission.productForm,
+                page: const ProductFormScreen(),
               );
             },
             tooltip: 'Add Product',
@@ -163,111 +178,54 @@ class _ProductListScreenState extends State<ProductListScreen> {
 
           const SizedBox(height: 8),
 
-          // Products list
           Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('products')
-                  .where('shopId', isEqualTo: _shopId)
-                  .orderBy('name')
-                  .snapshots(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
-                if (snapshot.hasError) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.error_outline,
-                          size: 64,
-                          color: Theme.of(context).colorScheme.error,
-                        ),
-                        const SizedBox(height: 16),
-                        Text('Error loading products: ${snapshot.error}'),
-                      ],
-                    ),
-                  );
-                }
-
-                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.inventory_2_outlined,
-                          size: 64,
-                          color: Theme.of(context).colorScheme.outline,
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          'No products found',
-                          style: Theme.of(context).textTheme.titleLarge,
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Tap + to add your first product',
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                color: Theme.of(context).colorScheme.outline,
-                              ),
-                        ),
-                      ],
-                    ),
-                  );
-                }
-
-                final allProducts = snapshot.data!.docs
-                    .map((doc) => ProductModel.fromMap(
-                          doc.data() as Map<String, dynamic>,
-                        ))
-                    .toList();
-
-                return Obx(() {
-                  var filteredProducts = allProducts;
-
-                  // Filter by search query
-                  if (_controller.searchQuery.value.isNotEmpty) {
-                    filteredProducts = filteredProducts
-                        .where((product) => product.name
-                            .toLowerCase()
-                            .contains(_controller.searchQuery.value.toLowerCase()))
+            child: Obx(
+              () => FirestorePaginatedList<ProductModel>(
+                cacheKey: 'products_admin_$_shopId',
+                queryBuilder: () => FirebaseFirestore.instance
+                    .collection('products')
+                    .where('shopId', isEqualTo: _shopId)
+                    .orderBy('name'),
+                parse: (data, _) => ProductModel.tryFromMap(data),
+                itemKey: (p) => p.productId,
+                filterItems: (items) {
+                  var filtered = items;
+                  final q = _controller.searchQuery.value.trim().toLowerCase();
+                  if (q.isNotEmpty) {
+                    filtered = filtered
+                        .where((p) => p.name.toLowerCase().contains(q))
                         .toList();
                   }
-
-                  // Filter by status
-                  if (_controller.selectedFilter.value == 'Active') {
-                    filteredProducts = filteredProducts
-                        .where((product) => product.status == 'Active')
-                        .toList();
-                  } else if (_controller.selectedFilter.value == 'Inactive') {
-                    filteredProducts = filteredProducts
-                        .where((product) => product.status == 'Inactive')
-                        .toList();
+                  final f = _controller.selectedFilter.value;
+                  if (f == 'Active') {
+                    filtered =
+                        filtered.where((p) => p.status == 'Active').toList();
+                  } else if (f == 'Inactive') {
+                    filtered =
+                        filtered.where((p) => p.status == 'Inactive').toList();
                   }
-
-                  if (filteredProducts.isEmpty) {
-                    return Center(
-                      child: Text(
-                        'No products match your filters',
-                        style: Theme.of(context).textTheme.bodyLarge,
+                  return filtered;
+                },
+                emptyBuilder: (context) => Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.inventory_2_outlined,
+                        size: 64,
+                        color: Theme.of(context).colorScheme.outline,
                       ),
-                    );
-                  }
-
-                  return ListView.builder(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: filteredProducts.length,
-                    itemBuilder: (context, index) {
-                      final product = filteredProducts[index];
-                      return _buildProductCard(context, product);
-                    },
-                  );
-                });
-              },
+                      const SizedBox(height: 16),
+                      Text(
+                        'No products found',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                    ],
+                  ),
+                ),
+                itemBuilder: (context, product) =>
+                    _buildProductCard(context, product),
+              ),
             ),
           ),
         ],
@@ -336,14 +294,13 @@ class _ProductListScreenState extends State<ProductListScreen> {
         trailing: PopupMenuButton<String>(
           onSelected: (value) {
             if (value == 'edit') {
-              Navigator.push(
+              GuardedNavigator.push(
                 context,
-                MaterialPageRoute(
-                  builder: (context) => ProductFormScreen(product: product),
-                ),
+                permission: ScreenPermission.productForm,
+                page: ProductFormScreen(product: product),
               );
             } else if (value == 'toggle') {
-              _toggleProductStatus(product);
+              _toggleProductStatus(context, product);
             }
           },
           itemBuilder: (context) => [

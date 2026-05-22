@@ -20,7 +20,21 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
     
-    // Get user role
+    // Normalize role from Firestore (rules see raw values, not Flutter normalization)
+    function normalizedRole(role) {
+      return role == 'SuperAdmin' || role == 'Super Admin' || role == 'superadmin' || role == 'super_admin';
+    }
+    function normalizedRoleAdmin(role) {
+      return role == 'Admin' || role == 'admin';
+    }
+    function normalizedRoleEmployee(role) {
+      return role == 'Employee' || role == 'employee';
+    }
+    function normalizedRoleViewer(role) {
+      return role == 'Viewer' || role == 'viewer';
+    }
+
+    // Get user role (canonical: SuperAdmin, Admin, Employee, Viewer)
     function getUserRole() {
       return requireAuth() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) 
         ? getUserData().role 
@@ -50,28 +64,32 @@ service cloud.firestore {
     
     // Check if user is Super Admin
     function isSuperAdmin() {
-      return getUserRole() == 'SuperAdmin';
+      return normalizedRole(getUserRole());
     }
     
     // Check if user is Admin
     function isAdmin() {
-      return getUserRole() == 'Admin';
+      return normalizedRoleAdmin(getUserRole());
     }
     
     // Check if user is Employee
     function isEmployee() {
-      return getUserRole() == 'Employee';
+      return normalizedRoleEmployee(getUserRole());
     }
     
     // Check if user is Viewer
     function isViewer() {
-      return getUserRole() == 'Viewer';
+      return normalizedRoleViewer(getUserRole());
     }
     
-    // Check if user is active
+    // Check if user is active (string "Active" or legacy bool/int from older seeds)
     function isUserActive() {
       return requireAuth() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) 
-        && getUserData().status == 'Active';
+        && (
+          getUserData().status == 'Active' ||
+          getUserData().status == true ||
+          getUserData().status == 1
+        );
     }
     
     // Check if resource shopId matches user shopId

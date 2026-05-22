@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../../core/firestore/firestore_parse.dart';
+import '../../data/models/order_item_model.dart';
 import '../../data/models/order_model.dart';
+import '../../data/models/product_model.dart';
 
 /// Order Detail Screen
 /// Shows order summary, customer and employee, and full item breakdown.
@@ -217,16 +220,21 @@ class OrderDetailScreen extends StatelessWidget {
 
     final list = <Map<String, dynamic>>[];
     for (final doc in itemsSnap.docs) {
-      final data = doc.data();
-      final productId = data['productId'] as String?;
-      String name = 'Product';
-      if (productId != null && productId.isNotEmpty) {
+      final data = FirestoreParse.queryDocumentData(doc);
+      if (data == null) continue;
+      final item = OrderItemModel.tryFromMap(data);
+      if (item == null) continue;
+      var name = item.productName.isNotEmpty ? item.productName : 'Product';
+      if (name == 'Product' && item.productId.isNotEmpty) {
         final productDoc = await FirebaseFirestore.instance
             .collection('products')
-            .doc(productId)
+            .doc(item.productId)
             .get();
-        if (productDoc.exists && productDoc.data() != null) {
-          name = productDoc.data()!['name'] as String? ?? productId;
+        final product = ProductModel.tryFromDocument(productDoc);
+        if (product != null && product.name.isNotEmpty) {
+          name = product.name;
+        } else if (item.productId.isNotEmpty) {
+          name = item.productId;
         }
       }
       list.add({

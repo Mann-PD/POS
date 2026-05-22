@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../core/firestore/firestore_parse.dart';
 
 class AuditLogModel {
   final String logId;
@@ -25,17 +26,30 @@ class AuditLogModel {
 
   factory AuditLogModel.fromMap(Map<String, dynamic> map) {
     return AuditLogModel(
-      logId: map['logId'] as String? ?? '',
-      userId: map['userId'] as String? ?? '',
-      role: map['role'] as String? ?? '',
-      shopId: map['shopId'] as String? ?? '',
-      action: map['action'] as String? ?? '',
-      entityType: map['entityType'] as String? ?? '',
-      entityId: map['entityId'] as String? ?? '',
-      details: map['details'] as Map<String, dynamic>?,
-      timestamp: map['timestamp'] is Timestamp
-          ? (map['timestamp'] as Timestamp).toDate()
-          : DateTime.now(),
+      logId: FirestoreParse.stringField(map['logId']),
+      userId: FirestoreParse.stringField(map['userId']),
+      role: FirestoreParse.stringField(map['role']),
+      shopId: FirestoreParse.stringField(map['shopId']),
+      action: FirestoreParse.stringField(map['action']),
+      entityType: FirestoreParse.stringField(map['entityType']),
+      entityId: FirestoreParse.stringField(map['entityId']),
+      details: FirestoreParse.mapField(map['details']),
+      timestamp: FirestoreParse.dateTimeField(map['timestamp']),
+    );
+  }
+
+  static AuditLogModel? tryFromMap(Map<String, dynamic>? map) {
+    if (map == null) return null;
+    final log = AuditLogModel.fromMap(map);
+    if (log.logId.isEmpty && log.action.isEmpty) return null;
+    return log;
+  }
+
+  static AuditLogModel? tryFromQueryDocument(QueryDocumentSnapshot doc) {
+    return FirestoreParse.tryParseQuery(
+      doc,
+      AuditLogModel.fromMap,
+      validate: (l) => l.logId.isNotEmpty || l.action.isNotEmpty,
     );
   }
 
