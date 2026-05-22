@@ -415,7 +415,7 @@ class _PosHomeScreenState extends State<PosHomeScreen> {
                         child: ListView.separated(
                           scrollDirection: Axis.horizontal,
                           itemCount: categoryList.length,
-                          separatorBuilder: (_, __) => const SizedBox(width: 8),
+                          separatorBuilder: (_, _) => const SizedBox(width: 8),
                           itemBuilder: (context, index) {
                             final category = categoryList[index];
                             final isSelected =
