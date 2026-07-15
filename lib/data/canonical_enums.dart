@@ -4,17 +4,17 @@
 
 /// User role. Firestore: "SuperAdmin" | "Admin" | "Employee" | "Viewer"
 enum Role {
-  SuperAdmin,
-  Admin,
-  Employee,
-  Viewer,
+  superAdmin,
+  admin,
+  employee,
+  viewer,
 }
 
 /// Account status. Firestore: "Active" | "Inactive" | "Suspended"
 enum AccountStatus {
-  Active,
-  Inactive,
-  Suspended,
+  active,
+  inactive,
+  suspended,
 }
 
 /// Order status. Firestore: "pending" | "locked" | "cancelled"
@@ -26,15 +26,20 @@ enum OrderStatus {
 
 /// Payment status. Firestore: "Success" | "Pending" | "Failed"
 enum PaymentStatus {
-  Success,
-  Pending,
-  Failed,
+  success,
+  pending,
+  failed,
 }
 
 // --- Role ---
 
 extension RoleFirestore on Role {
-  String get firestoreString => name;
+  String get firestoreString => switch (this) {
+        Role.superAdmin => 'SuperAdmin',
+        Role.admin => 'Admin',
+        Role.employee => 'Employee',
+        Role.viewer => 'Viewer',
+      };
 }
 
 extension RoleFirestoreParse on String {
@@ -49,7 +54,11 @@ extension RoleFirestoreParse on String {
 // --- AccountStatus ---
 
 extension AccountStatusFirestore on AccountStatus {
-  String get firestoreString => name;
+  String get firestoreString => switch (this) {
+        AccountStatus.active => 'Active',
+        AccountStatus.inactive => 'Inactive',
+        AccountStatus.suspended => 'Suspended',
+      };
 }
 
 extension AccountStatusFirestoreParse on String {
@@ -79,7 +88,11 @@ extension OrderStatusFirestoreParse on String {
 // --- PaymentStatus ---
 
 extension PaymentStatusFirestore on PaymentStatus {
-  String get firestoreString => name;
+  String get firestoreString => switch (this) {
+        PaymentStatus.success => 'Success',
+        PaymentStatus.pending => 'Pending',
+        PaymentStatus.failed => 'Failed',
+      };
 }
 
 extension PaymentStatusFirestoreParse on String {

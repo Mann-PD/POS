@@ -4,7 +4,14 @@
  */
 
 import * as admin from 'firebase-admin';
-import { AuditLog, User } from '../types';
+import { AuditLog } from '../types';
+
+/** Minimal user shape required by audit logging — only fields actually used. */
+interface AuditUser {
+  userId: string;
+  role: string;
+  shopId: string;
+}
 
 const db = admin.firestore();
 
@@ -13,7 +20,7 @@ const db = admin.firestore();
  * Audit logs are append-only and immutable
  */
 export async function createAuditLog(
-  user: User,
+  user: AuditUser,
   action: string,
   entityType: string,
   entityId: string,
@@ -71,7 +78,7 @@ export async function logAuthEvent(
     return;
   }
 
-  const user = userDoc.data() as User;
+  const user = userDoc.data() as AuditUser;
   await createAuditLog(
     user,
     action,
@@ -88,7 +95,7 @@ export async function logAuthEvent(
  * Logs price change events
  */
 export async function logPriceChange(
-  user: User,
+  user: AuditUser,
   productId: string,
   oldPrice: number,
   newPrice: number
@@ -110,7 +117,7 @@ export async function logPriceChange(
  * Logs expense changes
  */
 export async function logExpenseChange(
-  user: User,
+  user: AuditUser,
   expenseId: string,
   action: 'create' | 'update' | 'delete',
   amount?: number,
@@ -132,7 +139,7 @@ export async function logExpenseChange(
  * Logs user status changes
  */
 export async function logUserStatusChange(
-  actor: User,
+  actor: AuditUser,
   targetUserId: string,
   oldStatus: string,
   newStatus: string
@@ -153,7 +160,7 @@ export async function logUserStatusChange(
  * Logs order cancellation
  */
 export async function logOrderCancellation(
-  user: User,
+  user: AuditUser,
   orderId: string,
   reason?: string
 ): Promise<void> {
@@ -172,7 +179,7 @@ export async function logOrderCancellation(
  * Logs inventory changes
  */
 export async function logInventoryChange(
-  user: User,
+  user: AuditUser,
   productId: string,
   change: number,
   reason: string

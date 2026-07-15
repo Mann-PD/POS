@@ -15,13 +15,10 @@
 import * as functions from 'firebase-functions';
 import * as admin from 'firebase-admin';
 import {
-  User,
-  OrderStatus,
-  PaymentStatus,
-  ProductStatus,
   Product,
   Customer,
 } from '../types';
+import { OrderStatus, PaymentStatus } from '../types/canonicalEnums';
 import { validateEmployee } from '../utils/roleValidation';
 import { validateRequiredString } from '../utils/validation';
 
@@ -91,7 +88,7 @@ export const confirmOrder = functions.https.onCall(async (data, context) => {
   }
 
   // Only Employee role may confirm orders; shopId must match
-  let user: User;
+  let user: { userId: string; role: string; shopId: string; name: string; email: string; status: string };
   try {
     user = await validateEmployee(userId, shopId);
   } catch (e: any) {
@@ -153,8 +150,8 @@ export const confirmOrder = functions.https.onCall(async (data, context) => {
 
         // Accept both enum value ('active') and Firestore stored value ('Active')
         if (
-          product.status !== ProductStatus.ACTIVE &&
-          (product.status as string) !== 'Active'
+          (product.status as string) !== 'Active' &&
+          (product.status as string) !== 'active'
         ) {
           throw new functions.https.HttpsError(
             'failed-precondition',
@@ -229,8 +226,8 @@ export const confirmOrder = functions.https.onCall(async (data, context) => {
         employeeId: userId,
         totalAmount: calculatedTotalAmount,  // server-calculated; never trust client
         paymentMethod,
-        paymentStatus: PaymentStatus.SUCCESS,   // 'Success'
-        orderStatus: OrderStatus.LOCKED,        // 'locked' — immediately locked
+        paymentStatus: PaymentStatus.Success,   // 'Success'
+        orderStatus: OrderStatus.locked,        // 'locked' — immediately locked
         createdAt: now,
       });
 
@@ -286,7 +283,7 @@ export const confirmOrder = functions.https.onCall(async (data, context) => {
       return {
         success: true,
         orderId,
-        orderStatus: OrderStatus.LOCKED,
+        orderStatus: OrderStatus.locked,
         totalAmount: calculatedTotalAmount,  // server-calculated
         paymentMethod,
         itemCount: payload.items.length,

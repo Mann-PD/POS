@@ -269,7 +269,7 @@ class _DailySalesSummaryScreenState extends State<DailySalesSummaryScreen> {
                 final totalOrders = orders.length;
                 final totalSales = orders.fold<double>(
                   0.0,
-                  (sum, order) => sum + order.totalAmount,
+                  (acc, order) => acc + order.totalAmount,
                 );
 
                 return SingleChildScrollView(

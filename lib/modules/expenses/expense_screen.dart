@@ -155,7 +155,7 @@ class _ExpenseScreenState extends State<ExpenseScreen> {
                 itemBuilder: (context, expense) =>
                     _buildExpenseCard(context, expense),
               ),
-            ),
+            ),  
           ),
         ],
       ),

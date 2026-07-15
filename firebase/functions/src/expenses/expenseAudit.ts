@@ -21,7 +21,7 @@
 
 import * as functions from 'firebase-functions';
 import * as admin from 'firebase-admin';
-import { Expense, UserRole } from '../types';
+import { Expense } from '../types';
 import { validateAdminOrSuper } from '../utils/roleValidation';
 import {
   validateRequiredString,
@@ -88,7 +88,7 @@ export const createOrUpdateExpense = functions.https.onCall(async (data, context
 
     if (action === 'delete') {
       // No delete allowed for Admin; only SuperAdmin may delete (canonical: "SuperAdmin")
-      if (user.role !== UserRole.SUPER_ADMIN) {
+      if (user.role !== 'SuperAdmin') {
         throw new functions.https.HttpsError(
           'permission-denied',
           'Only SuperAdmin may delete expenses. Delete not allowed for Admin.'

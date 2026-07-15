@@ -21,7 +21,8 @@
 
 import * as functions from 'firebase-functions';
 import * as admin from 'firebase-admin';
-import { CancelOrderRequest, Order, OrderStatus } from '../types';
+import { CancelOrderRequest, Order } from '../types';
+import { OrderStatus } from '../types/canonicalEnums';
 import { validateAdminOrSuper } from '../utils/roleValidation';
 import { validateRequiredString } from '../utils/validation';
 import { createAuditLog } from '../utils/auditLogger';
@@ -73,7 +74,7 @@ export const cancelOrder = functions.https.onCall(async (data, context) => {
       }
 
       // Check if order is already cancelled
-      if (order.orderStatus === OrderStatus.CANCELLED) {
+      if ((order.orderStatus as string) === OrderStatus.cancelled) {
         throw new functions.https.HttpsError(
           'failed-precondition',
           'Order is already cancelled'
@@ -81,7 +82,7 @@ export const cancelOrder = functions.https.onCall(async (data, context) => {
       }
 
       // Prevent cancellation of locked orders
-      if (order.orderStatus === OrderStatus.LOCKED) {
+      if ((order.orderStatus as string) === OrderStatus.locked) {
         throw new functions.https.HttpsError(
           'failed-precondition',
           `Cannot cancel order with status: ${order.orderStatus}. Only pending orders can be cancelled.`
@@ -90,14 +91,14 @@ export const cancelOrder = functions.https.onCall(async (data, context) => {
 
       // Update order status to cancelled
       transaction.update(orderRef, {
-        orderStatus: OrderStatus.CANCELLED,
+        orderStatus: OrderStatus.cancelled,
       });
 
       return {
         success: true,
         orderId,
         previousStatus: order.orderStatus,
-        newStatus: OrderStatus.CANCELLED,
+        newStatus: OrderStatus.cancelled,
         totalAmount: order.totalAmount,
         paymentMethod: order.paymentMethod,
         message: 'Order cancelled successfully',

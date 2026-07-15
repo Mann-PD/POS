@@ -20,7 +20,7 @@
 import * as functions from 'firebase-functions';
 import * as admin from 'firebase-admin';
 
-import { Product, User } from '../types';
+import { Product } from '../types';
 import { validateAdminOrSuper } from '../utils/roleValidation';
 import { validateRequiredString } from '../utils/validation';
 
@@ -66,7 +66,7 @@ export const adjustStock = functions.https.onCall(
       }
       const adjustment: number = rawAdjustment;
 
-      let user: User;
+      let user: Awaited<ReturnType<typeof validateAdminOrSuper>>;
       try {
         user = await validateAdminOrSuper(userId, shopId);
       } catch (e: any) {
